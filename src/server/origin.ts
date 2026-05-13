@@ -1,3 +1,6 @@
+// TMDB place_of_birth values are free text, usually "City, Region, Country".
+// The aliases below cover the common country names and UK constituent countries
+// that appear in comedian records.
 const countryAliases = new Map<string, { code: string; name: string }>([
   ['australia', { code: 'AU', name: 'Australia' }],
   ['canada', { code: 'CA', name: 'Canada' }],
@@ -26,6 +29,8 @@ const countryAliases = new Map<string, { code: string; name: string }>([
   ['wales', { code: 'GB', name: 'United Kingdom' }]
 ]);
 
+// TMDB often ends US birthplaces with a state abbreviation instead of
+// "United States", so the origin parser treats those abbreviations as US.
 const stateCodes = new Set([
   'al', 'ak', 'az', 'ar', 'ca', 'co', 'ct', 'de', 'fl', 'ga', 'hi', 'id', 'il', 'in', 'ia', 'ks', 'ky', 'la', 'me',
   'md', 'ma', 'mi', 'mn', 'ms', 'mo', 'mt', 'ne', 'nv', 'nh', 'nj', 'nm', 'ny', 'nc', 'nd', 'oh', 'ok', 'or', 'pa',
@@ -45,6 +50,8 @@ export function originFromPlaceOfBirth(placeOfBirth: string | null): {
     .map((part) => part.trim())
     .filter(Boolean);
 
+  // Work from the right because the country is normally the last component.
+  // This also lets "Boston, MA" resolve through the US state fallback.
   for (const part of [...parts].reverse()) {
     const normalized = part.toLowerCase().replace(/\.$/, '');
     const alias = countryAliases.get(normalized);

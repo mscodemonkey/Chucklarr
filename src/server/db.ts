@@ -4,12 +4,18 @@ import { DatabaseSync } from 'node:sqlite';
 import type { AppSettings, BackupData, Candidate, CandidateStatus, Comedian, RestoreSummary } from '../shared/types';
 import { env, settingsFromEnv } from './env';
 
+// The server process owns one SQLite connection for its lifetime. Tests set
+// DATABASE_PATH before importing this module so each test run gets an isolated
+// database without changing production code.
 fs.mkdirSync(path.dirname(env.databasePath), { recursive: true });
 
 const db = new DatabaseSync(env.databasePath);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
+// Keep schema creation and lightweight migrations close together. Chucklarr is
+// still small enough that this is easier for contributors to reason about than
+// a separate migration framework.
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -60,6 +66,8 @@ if (!comedianColumns.has('country_name')) {
   db.exec('ALTER TABLE comedians ADD COLUMN country_name TEXT');
 }
 
+// Defaults are both the first-run settings and the allow-list for writes. Any
+// new setting should be added here, to AppSettings, and to the UI translations.
 const defaultSettings: AppSettings = {
   language: 'en-GB',
   theme: 'system',
@@ -79,16 +87,23 @@ const defaultSettings: AppSettings = {
 };
 const envSettings = settingsFromEnv();
 
+// Insert missing settings without overwriting saved user choices.
 for (const [key, value] of Object.entries(defaultSettings)) {
   db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 }
 
+// Environment values are intended to help first boot and container deployment.
+// They only fill blank settings so the UI remains the source of truth after a
+// user has configured the app.
 for (const [key, value] of Object.entries(envSettings)) {
   if (value) {
     db.prepare('UPDATE settings SET value = ? WHERE key = ? AND value = ?').run(value, key, '');
   }
 }
 
+// SQLite returns untyped records with snake_case columns. The mapper functions
+// are the single boundary where those rows become the camelCase API objects used
+// by both the Express server and React client.
 function mapComedian(row: Record<string, unknown>): Comedian {
   return {
     id: Number(row.id),
@@ -103,6 +118,9 @@ function mapComedian(row: Record<string, unknown>): Comedian {
   };
 }
 
+// Candidate rows always join the comedian name before mapping. That keeps the
+// API response self-contained and avoids extra client lookups when rendering
+// review cards.
 function mapCandidate(row: Record<string, unknown>): Candidate {
   return {
     id: Number(row.id),
@@ -162,6 +180,8 @@ export function createComedian(input: {
   countryCode?: string | null;
   countryName?: string | null;
 }): Comedian {
+  // TMDB person IDs are unique, so adding the same comedian again should return
+  // the existing row. If newer metadata includes origin fields, backfill them.
   const existing = input.tmdbPersonId
     ? (db.prepare('SELECT * FROM comedians WHERE tmdb_person_id = ?').get(input.tmdbPersonId) as Record<string, unknown> | undefined)
     : undefined;
@@ -243,6 +263,9 @@ export function upsertCandidate(input: {
       release_date = excluded.release_date,
       confidence = excluded.confidence,
       reasons_json = excluded.reasons_json,
+      -- Rescans should refresh TMDB metadata, but they must not erase a user's
+      -- review decision. A Radarr-backed update is the exception because it
+      -- reflects real library state and carries a radarr_movie_id.
       status = CASE
         WHEN excluded.radarr_movie_id IS NOT NULL THEN excluded.status
         WHEN candidates.status IN ('ignored', 'rejected', 'approved', 'auto_added') THEN candidates.status
@@ -330,11 +353,16 @@ export function createBackup(): BackupData {
 }
 
 export function restoreBackup(input: unknown): RestoreSummary {
+  // Parse and validate before opening the transaction. Invalid backups should
+  // fail without changing the current database.
   const backup = parseBackup(input);
   const settingKeys = Object.keys(defaultSettings) as Array<keyof AppSettings>;
 
   db.exec('BEGIN IMMEDIATE');
   try {
+    // Restore is intentionally a full replacement. Backups are meant for moving
+    // or recovering an install, so mixing old and new rows would create harder
+    // to diagnose duplicate decisions.
     db.prepare('DELETE FROM candidates').run();
     db.prepare('DELETE FROM comedians').run();
     db.prepare('DELETE FROM settings').run();
@@ -443,6 +471,8 @@ function parseBackup(input: unknown): BackupData {
   const comediansInput = requireArray(record.comedians, 'Backup comedians');
   const comedianIds = new Set<number>();
   const tmdbPersonIds = new Set<number>();
+  // Validate IDs and uniqueness up front so the transaction can restore rows in
+  // their original shape without relying on partial SQLite errors for feedback.
   const comedians = comediansInput.map((value, index): Comedian => {
     const comedian = requireRecord(value, `comedians[${index}]`);
     const id = requirePositiveInteger(comedian.id, `comedians[${index}].id`);
@@ -475,6 +505,8 @@ function parseBackup(input: unknown): BackupData {
   const candidatesInput = requireArray(record.candidates, 'Backup candidates');
   const candidateIds = new Set<number>();
   const candidateKeys = new Set<string>();
+  // Candidate validation also checks foreign keys and per-comedian movie
+  // uniqueness, which makes backup errors understandable to users.
   const candidates = candidatesInput.map((value, index): Candidate => {
     const candidate = requireRecord(value, `candidates[${index}]`);
     const id = requirePositiveInteger(candidate.id, `candidates[${index}].id`);

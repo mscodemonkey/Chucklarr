@@ -49,6 +49,9 @@ export class TmdbClient {
 
   constructor(settings: AppSettings) {
     this.token = settings.tmdbBearerToken.trim();
+    // "service" means Chucklarr talks to a metadata proxy; "tmdb" means this
+    // server uses the user's bearer token directly. The browser never receives
+    // either credential.
     this.metadataSource = settings.metadataSource === 'tmdb' ? 'tmdb' : 'service';
     this.metadataServiceUrl = settings.metadataServiceUrl.trim().replace(/\/+$/, '');
   }
@@ -77,6 +80,8 @@ export class TmdbClient {
   }
 
   async movieDetails(movieId: number): Promise<TmdbMovieDetails> {
+    // Keywords and credits are requested with movie details because the scorer
+    // needs all three sets of signals for each candidate.
     return this.request<TmdbMovieDetails>(`/movie/${movieId}?append_to_response=keywords,credits`);
   }
 

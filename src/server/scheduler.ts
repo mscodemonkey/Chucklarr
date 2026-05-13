@@ -9,6 +9,13 @@ const comedianDelayJitterMs = 20_000;
 let dailyScanTimer: NodeJS.Timeout | null = null;
 let dailyScanRunning = false;
 
+/**
+ * Starts the once-a-day scan loop.
+ *
+ * Each installation gets one saved local time between 02:00 and 04:59. Keeping
+ * the time stable avoids surprising users; randomising the first assignment
+ * avoids many public installs hitting TMDB or the metadata proxy at once.
+ */
 export function startDailyScanScheduler() {
   const time = ensureDailyScanTime();
   scheduleNextDailyScan(time);
@@ -56,6 +63,9 @@ async function runDailyScan() {
     const comedians = listComedians().filter((comedian) => comedian.tmdbPersonId);
     console.log(`Daily comedian scan starting for ${comedians.length} comedians.`);
 
+    // Scan sequentially with jitter rather than firing one large burst. That is
+    // kinder to the configured metadata source and makes failures easier to
+    // attribute in the logs.
     for (const [index, comedian] of comedians.entries()) {
       try {
         await scanComedian(comedian.id);

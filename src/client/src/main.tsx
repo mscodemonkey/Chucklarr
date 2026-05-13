@@ -1333,6 +1333,10 @@ function hasDirectComedianEvidence(candidate: Candidate) {
   return candidate.reasons.includes('Comedian name in title') || candidate.reasons.includes('Credited as self');
 }
 
+// Radarr can prove a movie is already monitored, but it cannot prove that the
+// selected comedian is meaningfully attached to that movie. Hide approved
+// Radarr-only matches from the monitored counts unless the scanner found direct
+// comedian evidence too.
 function isWeakRadarrOnlyMatch(candidate: Candidate) {
   return candidate.status === 'approved' && candidate.reasons.includes('Already in Radarr') && !hasDirectComedianEvidence(candidate);
 }

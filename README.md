@@ -276,6 +276,16 @@ Type-check only:
 npm run typecheck
 ```
 
+Run the unit tests:
+
+```bash
+npm test
+```
+
+The tests use Node's built-in test runner. Database tests create a temporary
+SQLite database through `DATABASE_PATH`, so they will not touch your local
+Chucklarr data.
+
 ## Environment Variables
 
 Most settings can be changed in the UI. Environment variables are useful for first boot, Docker, or automation.

@@ -32,6 +32,8 @@ type RadarrRootFolderResponse = {
 export class RadarrClient {
   constructor(private readonly settings: AppSettings) {}
 
+  // A basic connection can read Radarr options and library state. Adding movies
+  // also needs a quality profile and root folder, so that uses configured below.
   get connectionConfigured(): boolean {
     return Boolean(this.settings.radarrUrl.trim() && this.settings.radarrApiKey.trim());
   }
@@ -136,6 +138,8 @@ export class RadarrClient {
     }
 
     const movies = await this.get<RadarrMovie[]>('/api/v3/movie');
+    // TMDB IDs are the stable cross-service identifier. Titles and years can be
+    // localised or corrected independently in TMDB and Radarr.
     return new Map(
       movies
         .filter((movie): movie is RadarrMovie & { tmdbId: number } => Boolean(movie.id && movie.tmdbId))

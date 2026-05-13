@@ -29,6 +29,9 @@ const clientDist = path.resolve(dirname, '../client');
 
 app.use(express.json({ limit: '25mb' }));
 
+// Express 5 handles returned promises in many cases, but keeping a tiny wrapper
+// makes route intent explicit and ensures all async failures flow through the
+// JSON error handler below.
 function asyncRoute(handler: express.RequestHandler): express.RequestHandler {
   return (request, response, next) => {
     Promise.resolve(handler(request, response, next)).catch(next);
@@ -169,6 +172,9 @@ async function comediansWithOrigin() {
     return comedians;
   }
 
+  // Older databases may have comedians saved before country fields existed.
+  // Backfill origin lazily when the library loads instead of forcing a blocking
+  // migration that calls the external metadata service on startup.
   await Promise.all(
     missingOrigin.map(async (comedian) => {
       if (!comedian.tmdbPersonId) return;

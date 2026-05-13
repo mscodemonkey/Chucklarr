@@ -4,6 +4,15 @@ import { scoreStandupCandidate } from './classifier';
 import { RadarrClient } from './radarr';
 import { TmdbClient } from './tmdb';
 
+/**
+ * Scan one comedian's TMDB movie credits and persist the likely stand-up
+ * candidates.
+ *
+ * The scanner is the policy layer that sits between raw metadata and local
+ * review state. It asks TMDB for credits, scores each movie, checks Radarr for
+ * existing library matches, preserves prior user decisions, and optionally
+ * auto-adds high-confidence specials.
+ */
 export async function scanComedian(comedianId: number): Promise<ScanResult> {
   const comedian = getComedian(comedianId);
   if (!comedian) {
@@ -27,6 +36,9 @@ export async function scanComedian(comedianId: number): Promise<ScanResult> {
     const details = await tmdb.movieDetails(credit.id);
     const score = scoreStandupCandidate(comedian.name, credit, details);
 
+    // Very weak matches are not saved at all. This keeps noisy credits out of
+    // the local database while still allowing borderline matches to be reviewed
+    // or auto-hidden according to the configured threshold.
     if (score.confidence < 35) {
       continue;
     }
@@ -38,6 +50,9 @@ export async function scanComedian(comedianId: number): Promise<ScanResult> {
     let radarrMovieId = radarrMovie?.id ?? null;
     let reasons = alreadyInRadarr ? [...score.reasons, 'Already in Radarr'] : score.reasons;
 
+    // Manual review decisions are sticky across rescans. TMDB metadata can
+    // improve over time, but a user who ignored or rejected a title should not
+    // have to dismiss the same candidate again unless Radarr now owns it.
     if (!alreadyInRadarr && existingCandidate?.status === 'ignored') {
       status = 'ignored';
       reasons = [...reasons, 'Previously ignored'];
@@ -48,11 +63,17 @@ export async function scanComedian(comedianId: number): Promise<ScanResult> {
       reasons = [...reasons, 'Previously rejected'];
     }
 
+    // Auto-ignore happens after sticky decisions are applied. It only affects
+    // fresh candidates, which means contributors can tune the threshold without
+    // rewriting historical user choices.
     if (!alreadyInRadarr && status === 'new' && score.confidence < hideBelowThreshold) {
       status = 'ignored';
       reasons = [...reasons, `Below ${hideBelowThreshold} hide threshold`];
     }
 
+    // Auto-add is deliberately gated by both confidence and complete Radarr
+    // configuration. If Radarr is only partially set up, the candidate remains
+    // reviewable instead of failing the scan.
     if (!alreadyInRadarr && status === 'new' && score.confidence >= autoAddThreshold && radarr.configured) {
       try {
         const addedMovie = await radarr.addMovie({
@@ -121,6 +142,8 @@ async function loadRadarrMovieIndex(radarr: RadarrClient) {
   try {
     return await radarr.existingMoviesByTmdbId();
   } catch (caught) {
+    // A Radarr outage should not block TMDB discovery. The scan can still save
+    // candidates; they simply will not be marked as already present this time.
     console.warn(caught instanceof Error ? `Radarr library check skipped: ${caught.message}` : 'Radarr library check skipped.');
     return new Map<number, { id?: number; tmdbId?: number }>();
   }
