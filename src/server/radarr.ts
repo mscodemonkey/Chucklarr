@@ -1,0 +1,199 @@
+import type {
+  AppSettings,
+  Candidate,
+  RadarrMonitoredMovie,
+  RadarrOptions,
+  RadarrQualityProfile,
+  RadarrRootFolder
+} from '../shared/types';
+
+type RadarrMovie = {
+  id?: number;
+  title?: string;
+  tmdbId?: number;
+  year?: number;
+  monitored?: boolean;
+  hasFile?: boolean;
+  path?: string;
+};
+
+type RadarrQualityProfileResponse = {
+  id?: number;
+  name?: string;
+};
+
+type RadarrRootFolderResponse = {
+  id?: number;
+  path?: string;
+  freeSpace?: number;
+  accessible?: boolean;
+};
+
+export class RadarrClient {
+  constructor(private readonly settings: AppSettings) {}
+
+  get connectionConfigured(): boolean {
+    return Boolean(this.settings.radarrUrl.trim() && this.settings.radarrApiKey.trim());
+  }
+
+  get configured(): boolean {
+    return Boolean(
+      this.connectionConfigured &&
+        this.settings.radarrQualityProfileId.trim() &&
+        this.settings.radarrRootFolderPath.trim()
+    );
+  }
+
+  async options(): Promise<RadarrOptions> {
+    if (!this.connectionConfigured) {
+      return {
+        connected: false,
+        qualityProfiles: [],
+        rootFolders: [],
+        error: 'Radarr URL and API key are required.'
+      };
+    }
+
+    try {
+      const [qualityProfiles, rootFolders] = await Promise.all([
+        this.get<RadarrQualityProfileResponse[]>('/api/v3/qualityprofile'),
+        this.get<RadarrRootFolderResponse[]>('/api/v3/rootfolder')
+      ]);
+
+      return {
+        connected: true,
+        qualityProfiles: qualityProfiles
+          .filter((profile): profile is RadarrQualityProfile => Boolean(profile.id && profile.name))
+          .map((profile) => ({ id: profile.id, name: profile.name })),
+        rootFolders: rootFolders
+          .filter((folder) => Boolean(folder.path))
+          .map<RadarrRootFolder>((folder) => ({
+            id: folder.id ?? null,
+            path: folder.path as string,
+            freeSpace: folder.freeSpace ?? null,
+            accessible: folder.accessible ?? null
+          }))
+      };
+    } catch (caught) {
+      return {
+        connected: false,
+        qualityProfiles: [],
+        rootFolders: [],
+        error: caught instanceof Error ? caught.message : 'Unable to connect to Radarr.'
+      };
+    }
+  }
+
+  async addMovie(candidate: Candidate): Promise<RadarrMovie> {
+    if (!this.configured) {
+      throw new Error('Radarr URL, API key, quality profile, and root folder must be configured.');
+    }
+
+    const response = await this.request('/api/v3/movie', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: candidate.title,
+        tmdbId: candidate.tmdbMovieId,
+        qualityProfileId: Number(this.settings.radarrQualityProfileId),
+        rootFolderPath: this.settings.radarrRootFolderPath,
+        monitored: true,
+        minimumAvailability: this.settings.radarrMinimumAvailability || 'released',
+        addOptions: {
+          searchForMovie: true
+        }
+      })
+    });
+
+    return response.json() as Promise<RadarrMovie>;
+  }
+
+  async setMovieMonitored(movieId: number, monitored: boolean): Promise<RadarrMovie> {
+    if (!this.connectionConfigured) {
+      throw new Error('Radarr URL and API key must be configured.');
+    }
+
+    const movie = await this.get<RadarrMovie>(`/api/v3/movie/${movieId}`);
+    const response = await this.request(`/api/v3/movie/${movieId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ...movie,
+        monitored
+      })
+    });
+
+    return response.json() as Promise<RadarrMovie>;
+  }
+
+  async existingMoviesByTmdbId(): Promise<Map<number, RadarrMovie>> {
+    if (!this.connectionConfigured) {
+      return new Map();
+    }
+
+    const movies = await this.get<RadarrMovie[]>('/api/v3/movie');
+    return new Map(
+      movies
+        .filter((movie): movie is RadarrMovie & { tmdbId: number } => Boolean(movie.id && movie.tmdbId))
+        .map((movie) => [movie.tmdbId, movie])
+    );
+  }
+
+  async monitoredMovies(): Promise<RadarrMonitoredMovie[]> {
+    if (!this.connectionConfigured) {
+      return [];
+    }
+
+    const movies = await this.get<RadarrMovie[]>('/api/v3/movie');
+    return movies
+      .filter((movie) => movie.id && movie.monitored)
+      .map((movie) => ({
+        id: movie.id as number,
+        tmdbId: movie.tmdbId ?? null,
+        title: movie.title ?? 'Untitled',
+        year: movie.year ?? null,
+        monitored: Boolean(movie.monitored),
+        hasFile: movie.hasFile ?? null,
+        path: movie.path ?? null
+      }))
+      .sort((first, second) => first.title.localeCompare(second.title));
+  }
+
+  async removeMovie(movieId: number): Promise<void> {
+    if (!this.connectionConfigured) {
+      throw new Error('Radarr URL and API key must be configured.');
+    }
+
+    await this.request(`/api/v3/movie/${movieId}?deleteFiles=false&addImportExclusion=false`, {
+      method: 'DELETE'
+    });
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    const response = await this.request(path);
+    return response.json() as Promise<T>;
+  }
+
+  private async request(path: string, init?: RequestInit): Promise<Response> {
+    const url = `${this.settings.radarrUrl.replace(/\/$/, '')}${path}`;
+    const response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(5000),
+      headers: {
+        'X-Api-Key': this.settings.radarrApiKey,
+        ...(init?.headers ?? {})
+      }
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Radarr request failed (${response.status}): ${text.slice(0, 300)}`);
+    }
+
+    return response;
+  }
+}
