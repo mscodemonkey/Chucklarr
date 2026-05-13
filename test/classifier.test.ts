@@ -94,3 +94,18 @@ test('returns a weak metadata reason when no scoring signals are present', () =>
   assert.equal(result.confidence, 0);
   assert.deepEqual(result.reasons, ['Weak metadata match']);
 });
+
+test('recognises exact-name comedy club title matches as likely specials', () => {
+  const result = scoreStandupCandidate(
+    'Gary Delaney',
+    credit({ title: 'Gary Delaney: Comedy Club Classics 2000-2013' }),
+    movieDetails({
+      title: 'Gary Delaney: Comedy Club Classics 2000-2013',
+      overview: 'A compilation of club material.',
+      runtime: 53
+    })
+  );
+
+  assert.equal(result.confidence, 75);
+  assert.deepEqual(result.reasons, ['Stand-up language', 'Comedian name in title', 'Special-length runtime']);
+});

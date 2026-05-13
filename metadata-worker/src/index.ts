@@ -81,6 +81,10 @@ function allowedTmdbPath(url: URL): string | null {
     return url.searchParams.has('query') ? path : null;
   }
 
+  if (path === '/search/movie') {
+    return url.searchParams.has('query') ? path : null;
+  }
+
   if (/^\/person\/\d+$/.test(path)) {
     return path;
   }

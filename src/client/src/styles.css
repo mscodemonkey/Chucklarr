@@ -339,6 +339,33 @@ h3 {
   margin-top: 4px;
 }
 
+.detailLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.detailLinks a {
+  align-items: center;
+  border: 1px solid var(--field-border);
+  border-radius: 999px;
+  color: var(--primary);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 11px;
+  text-decoration: none;
+}
+
+.detailLinks a:hover {
+  background: var(--primary-soft);
+  border-color: rgba(23, 126, 137, 0.38);
+  color: var(--primary-strong);
+}
+
 .settingsGrid {
   display: grid;
   gap: 24px;
@@ -571,6 +598,24 @@ label {
   color: var(--text-muted);
   font-size: 13px;
   margin-top: 3px;
+}
+
+.personMatchTitle {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.personMatchTitle strong {
+  min-width: 0;
+}
+
+.personMatchTitle .originFlag {
+  color: var(--text-strong);
+  display: inline-block;
+  font-size: 15px;
+  margin-top: 0;
 }
 
 .listDivider {
@@ -909,6 +954,34 @@ label {
   font-size: 13px;
 }
 
+.tmdbTitleLink {
+  align-items: center;
+  color: inherit;
+  display: inline-flex;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.tmdbTitleLink:hover {
+  color: var(--primary);
+}
+
+.tmdbTitleLink svg {
+  flex: 0 0 auto;
+}
+
+.tmdbTitleLink .tmdbTitleText {
+  color: inherit;
+  display: block;
+  font-size: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .monitoredActions {
   display: flex;
   flex-wrap: wrap;
@@ -1036,19 +1109,26 @@ label {
   border-radius: 8px;
   color: var(--text-muted);
   display: grid;
-  gap: 8px;
+  gap: 14px;
   justify-items: center;
-  min-height: 220px;
-  padding: 28px;
+  min-height: 320px;
+  padding: 42px 28px;
   text-align: center;
+}
+
+.detailEmptyState svg {
+  color: var(--text-subtle);
+  margin-bottom: 6px;
 }
 
 .detailEmptyState strong {
   color: var(--text-strong);
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .detailEmptyState span {
+  font-size: 16px;
+  line-height: 1.25;
   max-width: 360px;
 }
 

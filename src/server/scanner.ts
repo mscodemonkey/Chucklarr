@@ -1,17 +1,32 @@
 import type { CandidateStatus, ScanResult } from '../shared/types';
-import { getCandidateByMovie, getComedian, getSettings, listComedians, markComedianScanned, upsertCandidate } from './db';
+import {
+  getCandidateByMovie,
+  getComedian,
+  getSettings,
+  listComedians,
+  markComedianScanned,
+  updateComedianOrigin,
+  upsertCandidate
+} from './db';
 import { scoreStandupCandidate } from './classifier';
+import { originFromPlaceOfBirth } from './origin';
 import { RadarrClient } from './radarr';
-import { TmdbClient } from './tmdb';
+import { TmdbClient, type TmdbMovieCredit } from './tmdb';
+
+type ScanCredit = {
+  credit: TmdbMovieCredit;
+  source: 'person_credit' | 'title_search';
+};
 
 /**
  * Scan one comedian's TMDB movie credits and persist the likely stand-up
  * candidates.
  *
  * The scanner is the policy layer that sits between raw metadata and local
- * review state. It asks TMDB for credits, scores each movie, checks Radarr for
- * existing library matches, preserves prior user decisions, and optionally
- * auto-adds high-confidence specials.
+ * review state. It refreshes person origin metadata, asks TMDB for credits,
+ * supplements them with exact-name movie title matches, scores each movie,
+ * checks Radarr for existing library matches, preserves prior user decisions,
+ * and optionally auto-adds high-confidence specials.
  */
 export async function scanComedian(comedianId: number): Promise<ScanResult> {
   const comedian = getComedian(comedianId);
@@ -26,13 +41,17 @@ export async function scanComedian(comedianId: number): Promise<ScanResult> {
   const settings = getSettings();
   const tmdb = new TmdbClient(settings);
   const radarr = new RadarrClient(settings);
+  await refreshComedianOrigin(tmdb, comedian.id, comedian.tmdbPersonId);
   const radarrMoviesByTmdbId = await loadRadarrMovieIndex(radarr);
   const autoAddThreshold = confidenceThreshold(settings.autoAddConfidenceThreshold, 95);
   const hideBelowThreshold = confidenceThreshold(settings.hideBelowConfidenceThreshold, 60);
-  const credits = await tmdb.personMovieCredits(comedian.tmdbPersonId);
+  const credits = mergeScanCredits(
+    await tmdb.personMovieCredits(comedian.tmdbPersonId),
+    await loadTitleSearchCredits(tmdb, comedian.name)
+  );
   const saved = [];
 
-  for (const credit of credits) {
+  for (const { credit, source } of credits) {
     const details = await tmdb.movieDetails(credit.id);
     const score = scoreStandupCandidate(comedian.name, credit, details);
 
@@ -48,7 +67,8 @@ export async function scanComedian(comedianId: number): Promise<ScanResult> {
     const existingCandidate = getCandidateByMovie(comedian.id, details.id);
     let status: CandidateStatus = alreadyInRadarr ? 'approved' : 'new';
     let radarrMovieId = radarrMovie?.id ?? null;
-    let reasons = alreadyInRadarr ? [...score.reasons, 'Already in Radarr'] : score.reasons;
+    let reasons = source === 'title_search' ? [...score.reasons, 'Found by title search'] : score.reasons;
+    reasons = alreadyInRadarr ? [...reasons, 'Already in Radarr'] : reasons;
 
     // Manual review decisions are sticky across rescans. TMDB metadata can
     // improve over time, but a user who ignored or rejected a title should not
@@ -129,6 +149,69 @@ export async function scanComedian(comedianId: number): Promise<ScanResult> {
   };
 }
 
+async function refreshComedianOrigin(tmdb: TmdbClient, comedianId: number, tmdbPersonId: number): Promise<void> {
+  try {
+    const details = await tmdb.personDetails(tmdbPersonId);
+    const origin = originFromPlaceOfBirth(details.place_of_birth);
+    updateComedianOrigin(comedianId, {
+      homepage: normaliseHomepage(details.homepage),
+      placeOfBirth: details.place_of_birth,
+      countryCode: origin.countryCode,
+      countryName: origin.countryName
+    });
+  } catch (caught) {
+    // Origin metadata is useful UI context, but a failed person-details request
+    // should not block discovery of specials.
+    console.warn(caught instanceof Error ? `TMDB person refresh skipped: ${caught.message}` : 'TMDB person refresh skipped.');
+  }
+}
+
+function normaliseHomepage(homepage: string | null): string | null {
+  const trimmed = homepage?.trim() ?? '';
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+}
+
+async function loadTitleSearchCredits(tmdb: TmdbClient, comedianName: string): Promise<TmdbMovieCredit[]> {
+  try {
+    const movies = await tmdb.searchMovies(comedianName);
+    return movies
+      .filter((movie) => titleMatchesFullComedianName(movie.title, comedianName))
+      .map((movie) => ({
+        id: movie.id,
+        title: movie.title,
+        release_date: movie.release_date
+      }));
+  } catch (caught) {
+    console.warn(caught instanceof Error ? `TMDB title search skipped: ${caught.message}` : 'TMDB title search skipped.');
+    return [];
+  }
+}
+
+function mergeScanCredits(personCredits: TmdbMovieCredit[], titleSearchCredits: TmdbMovieCredit[]): ScanCredit[] {
+  const merged = new Map<number, ScanCredit>();
+
+  for (const credit of personCredits) {
+    merged.set(credit.id, { credit, source: 'person_credit' });
+  }
+
+  for (const credit of titleSearchCredits) {
+    if (!merged.has(credit.id)) {
+      merged.set(credit.id, { credit, source: 'title_search' });
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function titleMatchesFullComedianName(title: string, comedianName: string): boolean {
+  const normalizedName = normalizeSearchText(comedianName);
+  if (normalizedName.split(' ').length < 2) {
+    return false;
+  }
+
+  return normalizeSearchText(title).includes(normalizedName);
+}
+
 function confidenceThreshold(value: string, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
@@ -147,6 +230,15 @@ async function loadRadarrMovieIndex(radarr: RadarrClient) {
     console.warn(caught instanceof Error ? `Radarr library check skipped: ${caught.message}` : 'Radarr library check skipped.');
     return new Map<number, { id?: number; tmdbId?: number }>();
   }
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 export async function scanAllComedians(): Promise<ScanResult[]> {

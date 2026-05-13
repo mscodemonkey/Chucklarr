@@ -4,6 +4,7 @@ export type TmdbPerson = {
   id: number;
   name: string;
   profile_path: string | null;
+  known_for_department?: string;
   known_for?: Array<{
     title?: string;
     name?: string;
@@ -11,7 +12,15 @@ export type TmdbPerson = {
   }>;
 };
 
+export type TmdbMovieSearchResult = {
+  id: number;
+  title: string;
+  overview?: string;
+  release_date?: string;
+};
+
 export type TmdbPersonDetails = TmdbPerson & {
+  homepage: string | null;
   place_of_birth: string | null;
 };
 
@@ -77,6 +86,11 @@ export class TmdbClient {
   async personMovieCredits(personId: number): Promise<TmdbMovieCredit[]> {
     const data = await this.request<{ cast: TmdbMovieCredit[] }>(`/person/${personId}/movie_credits`);
     return data.cast ?? [];
+  }
+
+  async searchMovies(query: string): Promise<TmdbMovieSearchResult[]> {
+    const data = await this.request<{ results: TmdbMovieSearchResult[] }>(`/search/movie?query=${encodeURIComponent(query)}`);
+    return data.results ?? [];
   }
 
   async movieDetails(movieId: number): Promise<TmdbMovieDetails> {

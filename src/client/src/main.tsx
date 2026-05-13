@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   Download,
   Eye,
+  ExternalLink,
   Film,
   Play,
   Plus,
@@ -984,6 +985,7 @@ function App() {
                       const savedComedian = comedians.find((comedian) => comedian.tmdbPersonId === match.tmdbPersonId);
                       const isSaved = Boolean(savedComedian);
                       const buttonLabel = isSaved ? _t('comedians.show') : _t('comedians.select');
+                      const flag = countryFlag(match.countryCode);
                       return (
                         <article className="personMatch" key={match.tmdbPersonId}>
                           <div className="avatar">
@@ -994,7 +996,18 @@ function App() {
                             )}
                           </div>
                           <div>
-                            <strong>{match.name}</strong>
+                            <div className="personMatchTitle">
+                              <strong>{match.name}</strong>
+                              {flag && (
+                                <span
+                                  className="originFlag"
+                                  title={match.countryName ?? match.placeOfBirth ?? undefined}
+                                  aria-label={match.countryName ? _t('comedians.country', { country: match.countryName }) : undefined}
+                                >
+                                  {flag}
+                                </span>
+                              )}
+                            </div>
                             <span>{match.knownFor.length > 0 ? match.knownFor.join(' · ') : `TMDB ${match.tmdbPersonId}`}</span>
                           </div>
                           <button
@@ -1158,6 +1171,7 @@ function App() {
           </div>
 
           <div className="detailPanel">
+            {selectedComedian && (
             <div className="panelHeader spread">
               <div>
                 <div className="inlineTitle">
@@ -1165,22 +1179,34 @@ function App() {
                     <ChevronLeft size={16} aria-hidden="true" />
                   </button>
                   <h2>
-                    {selectedComedian ? selectedComedian.name : _t('detail.noSelectionTitle')}
-                    {selectedComedian && countryFlag(selectedComedian.countryCode) && (
+                    {selectedComedian.name}
+                    {countryFlag(selectedComedian.countryCode) && (
                       <span className="headingFlag" title={selectedComedian.countryName ?? selectedComedian.placeOfBirth ?? undefined}>
                         {countryFlag(selectedComedian.countryCode)}
                       </span>
                     )}
                   </h2>
                 </div>
-                <p>
-                  {selectedComedian ? _t('detail.selectedHint') : _t('detail.chooseHint')}
-                </p>
+                <div className="detailLinks" aria-label={_t('detail.linksLabel', { name: selectedComedian.name })}>
+                  {selectedComedian.tmdbPersonId && (
+                    <a href={`https://www.themoviedb.org/person/${selectedComedian.tmdbPersonId}`} target="_blank" rel="noreferrer">
+                      {_t('detail.viewTmdb')}
+                      <ExternalLink size={14} aria-hidden="true" />
+                    </a>
+                  )}
+                  {selectedComedian.homepage && (
+                    <a href={selectedComedian.homepage} target="_blank" rel="noreferrer">
+                      {_t('detail.viewHomepage')}
+                      <ExternalLink size={14} aria-hidden="true" />
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
+            )}
             {!selectedComedian ? (
               <div className="detailEmptyState">
-                <Film size={28} aria-hidden="true" />
+                <Film size={56} strokeWidth={1.8} aria-hidden="true" />
                 <strong>{_t('detail.noSelectionTitle')}</strong>
                 <span>{_t('detail.noSelectionHint')}</span>
               </div>
@@ -1341,6 +1367,19 @@ function isWeakRadarrOnlyMatch(candidate: Candidate) {
   return candidate.status === 'approved' && candidate.reasons.includes('Already in Radarr') && !hasDirectComedianEvidence(candidate);
 }
 
+function TmdbMovieTitleLink({ tmdbMovieId, title }: { tmdbMovieId: number | null; title: string }) {
+  if (!tmdbMovieId) {
+    return <>{title}</>;
+  }
+
+  return (
+    <a className="tmdbTitleLink" href={`https://www.themoviedb.org/movie/${tmdbMovieId}`} target="_blank" rel="noreferrer">
+      <span className="tmdbTitleText">{title}</span>
+      <ExternalLink size={13} aria-hidden="true" />
+    </a>
+  );
+}
+
 function MonitoredMovieRow({
   movie,
   candidate,
@@ -1357,6 +1396,7 @@ function MonitoredMovieRow({
   const canManageRadarr = Boolean(candidate?.radarrMovieId && !movie.hasFile);
   const unmonitoring = candidate ? busy === `unmonitor-radarr-${candidate.id}` : false;
   const removing = candidate ? busy === `remove-radarr-${candidate.id}` : false;
+  const tmdbMovieId = candidate?.tmdbMovieId ?? movie.tmdbId;
 
   return (
     <article className="monitoredItem">
@@ -1369,7 +1409,9 @@ function MonitoredMovieRow({
         {movie.hasFile ? <Check size={17} aria-hidden="true" /> : <Radar size={17} aria-hidden="true" />}
       </div>
       <div>
-        <strong>{movie.title}</strong>
+        <strong>
+          <TmdbMovieTitleLink tmdbMovieId={tmdbMovieId} title={movie.title} />
+        </strong>
         <span>
           {movie.year ? `${movie.year} · ` : ''}
           {movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
@@ -1502,7 +1544,9 @@ function CandidateCard({ candidate, busy, run, _t }: { candidate: Candidate; bus
       <div className="candidateBody">
         <div className="candidateTop">
           <div>
-            <h3>{candidate.title}</h3>
+            <h3>
+              <TmdbMovieTitleLink tmdbMovieId={candidate.tmdbMovieId} title={candidate.title} />
+            </h3>
             <p>{candidate.comedianName}{candidate.year ? ` · ${candidate.year}` : ''}</p>
           </div>
           <strong className={candidate.confidence >= 70 ? 'score high' : 'score'}>{candidate.confidence}</strong>

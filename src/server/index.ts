@@ -109,20 +109,46 @@ app.get(
       return;
     }
 
-    const people = await tmdb.searchPeople(query);
-    response.json(
-      people.slice(0, 8).map<PersonSearchResult>((person) => ({
-        tmdbPersonId: person.id,
-        name: person.name,
-        profilePath: person.profile_path,
-        knownFor: (person.known_for ?? [])
-          .map((knownFor) => knownFor.title ?? knownFor.name ?? '')
-          .filter(Boolean)
-          .slice(0, 3)
-      }))
+    const people = prioritiseComedianSearchResults(await tmdb.searchPeople(query));
+    const results = await Promise.all(
+      people.slice(0, 8).map<Promise<PersonSearchResult>>(async (person) => {
+        const details = await tmdb.personDetails(person.id).catch(() => null);
+        const origin = originFromPlaceOfBirth(details?.place_of_birth ?? null);
+        return {
+          tmdbPersonId: person.id,
+          name: details?.name ?? person.name,
+          profilePath: details?.profile_path ?? person.profile_path,
+          knownForDepartment: person.known_for_department ?? null,
+          placeOfBirth: details?.place_of_birth ?? null,
+          countryCode: origin.countryCode,
+          countryName: origin.countryName,
+          knownFor: (person.known_for ?? [])
+            .map((knownFor) => knownFor.title ?? knownFor.name ?? '')
+            .filter(Boolean)
+            .slice(0, 3)
+        };
+      })
     );
+    response.json(results);
   })
 );
+
+function prioritiseComedianSearchResults<T extends { known_for_department?: string }>(people: T[]): T[] {
+  // Comedians are normally stored as actors in TMDB. Keep TMDB's relevance order
+  // inside each group, but show acting results before directing/writing/crew
+  // matches that happen to share the same name.
+  return people
+    .map((person, index) => ({ person, index }))
+    .sort((first, second) => {
+      const firstIsActing = first.person.known_for_department === 'Acting';
+      const secondIsActing = second.person.known_for_department === 'Acting';
+      if (firstIsActing !== secondIsActing) {
+        return firstIsActing ? -1 : 1;
+      }
+      return first.index - second.index;
+    })
+    .map(({ person }) => person);
+}
 
 app.post(
   '/api/comedians',
@@ -151,6 +177,7 @@ app.post(
       name: details?.name ?? person?.name ?? name,
       tmdbPersonId: details?.id ?? person?.id ?? null,
       profilePath: details?.profile_path ?? person?.profile_path ?? null,
+      homepage: normaliseHomepage(details?.homepage ?? null),
       placeOfBirth: details?.place_of_birth ?? null,
       countryCode: origin.countryCode,
       countryName: origin.countryName
@@ -182,6 +209,7 @@ async function comediansWithOrigin() {
       if (!details?.place_of_birth) return;
       const origin = originFromPlaceOfBirth(details.place_of_birth);
       updateComedianOrigin(comedian.id, {
+        homepage: normaliseHomepage(details.homepage),
         placeOfBirth: details.place_of_birth,
         countryCode: origin.countryCode,
         countryName: origin.countryName
@@ -190,6 +218,11 @@ async function comediansWithOrigin() {
   );
 
   return listComedians();
+}
+
+function normaliseHomepage(homepage: string | null): string | null {
+  const trimmed = homepage?.trim() ?? '';
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null;
 }
 
 app.delete('/api/comedians/:id', (request, response) => {

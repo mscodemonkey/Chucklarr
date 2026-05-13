@@ -8,8 +8,10 @@ const positivePhrases = [
   'standup',
   'stand up',
   'comedy special',
+  'comedy club',
   'one-man show',
   'one woman show',
+  'full show',
   'live at',
   'live from',
   'on stage',
@@ -58,6 +60,8 @@ export function scoreStandupCandidate(
   // Short name fragments like "de" or "jo" create noisy title matches, so only
   // meaningful tokens are allowed to influence the score.
   const comedianTokens = comedianName.toLowerCase().split(/\s+/).filter((token) => token.length > 2);
+  const normalizedTitle = normalizeSearchText(details.title);
+  const normalizedComedianName = normalizeSearchText(comedianName);
 
   if (details.genres.some((genre) => genre.name.toLowerCase() === 'comedy')) {
     score += 20;
@@ -74,9 +78,12 @@ export function scoreStandupCandidate(
     reasons.push('Stand-up language');
   }
 
-  if (comedianTokens.some((token) => title.includes(token))) {
-    score += 20;
+  if (normalizedComedianName && normalizedTitle.includes(normalizedComedianName)) {
+    score += 30;
     reasons.push('Comedian name in title');
+  } else if (comedianTokens.some((token) => title.includes(token))) {
+    score += 20;
+    reasons.push('Partial comedian name in title');
   }
 
   if ((credit.character ?? '').toLowerCase().includes('self')) {
@@ -113,4 +120,13 @@ export function scoreStandupCandidate(
     confidence: Math.max(0, Math.min(100, score)),
     reasons: reasons.length > 0 ? reasons : ['Weak metadata match']
   };
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }

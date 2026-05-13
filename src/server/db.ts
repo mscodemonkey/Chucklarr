@@ -27,6 +27,7 @@ db.exec(`
     name TEXT NOT NULL,
     tmdb_person_id INTEGER UNIQUE,
     profile_path TEXT,
+    homepage TEXT,
     place_of_birth TEXT,
     country_code TEXT,
     country_name TEXT,
@@ -58,6 +59,9 @@ const comedianColumns = new Set(
 );
 if (!comedianColumns.has('place_of_birth')) {
   db.exec('ALTER TABLE comedians ADD COLUMN place_of_birth TEXT');
+}
+if (!comedianColumns.has('homepage')) {
+  db.exec('ALTER TABLE comedians ADD COLUMN homepage TEXT');
 }
 if (!comedianColumns.has('country_code')) {
   db.exec('ALTER TABLE comedians ADD COLUMN country_code TEXT');
@@ -110,6 +114,7 @@ function mapComedian(row: Record<string, unknown>): Comedian {
     name: String(row.name),
     tmdbPersonId: row.tmdb_person_id == null ? null : Number(row.tmdb_person_id),
     profilePath: row.profile_path == null ? null : String(row.profile_path),
+    homepage: row.homepage == null ? null : String(row.homepage),
     placeOfBirth: row.place_of_birth == null ? null : String(row.place_of_birth),
     countryCode: row.country_code == null ? null : String(row.country_code),
     countryName: row.country_name == null ? null : String(row.country_name),
@@ -176,6 +181,7 @@ export function createComedian(input: {
   name: string;
   tmdbPersonId: number | null;
   profilePath: string | null;
+  homepage?: string | null;
   placeOfBirth?: string | null;
   countryCode?: string | null;
   countryName?: string | null;
@@ -188,11 +194,12 @@ export function createComedian(input: {
 
   if (existing) {
     const comedian = mapComedian(existing);
-    if (!comedian.countryCode && (input.placeOfBirth || input.countryCode || input.countryName)) {
+    if ((!comedian.countryCode && (input.placeOfBirth || input.countryCode || input.countryName)) || (!comedian.homepage && input.homepage)) {
       updateComedianOrigin(comedian.id, {
-        placeOfBirth: input.placeOfBirth ?? null,
-        countryCode: input.countryCode ?? null,
-        countryName: input.countryName ?? null
+        homepage: input.homepage ?? comedian.homepage,
+        placeOfBirth: input.placeOfBirth ?? comedian.placeOfBirth,
+        countryCode: input.countryCode ?? comedian.countryCode,
+        countryName: input.countryName ?? comedian.countryName
       });
       return getComedian(comedian.id) as Comedian;
     }
@@ -201,22 +208,33 @@ export function createComedian(input: {
 
   const result = db
     .prepare(`
-      INSERT INTO comedians (name, tmdb_person_id, profile_path, place_of_birth, country_code, country_name)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO comedians (name, tmdb_person_id, profile_path, homepage, place_of_birth, country_code, country_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
-    .run(input.name, input.tmdbPersonId, input.profilePath, input.placeOfBirth ?? null, input.countryCode ?? null, input.countryName ?? null);
+    .run(
+      input.name,
+      input.tmdbPersonId,
+      input.profilePath,
+      input.homepage ?? null,
+      input.placeOfBirth ?? null,
+      input.countryCode ?? null,
+      input.countryName ?? null
+    );
   return getComedian(Number(result.lastInsertRowid)) as Comedian;
 }
 
 export function updateComedianOrigin(
   id: number,
-  input: { placeOfBirth: string | null; countryCode: string | null; countryName: string | null }
+  input: { homepage?: string | null; placeOfBirth: string | null; countryCode: string | null; countryName: string | null }
 ): Comedian | null {
   db.prepare(`
     UPDATE comedians
-    SET place_of_birth = ?, country_code = ?, country_name = ?
+    SET homepage = CASE WHEN ? THEN ? ELSE homepage END,
+        place_of_birth = ?,
+        country_code = ?,
+        country_name = ?
     WHERE id = ?
-  `).run(input.placeOfBirth, input.countryCode, input.countryName, id);
+  `).run(input.homepage !== undefined ? 1 : 0, input.homepage ?? null, input.placeOfBirth, input.countryCode, input.countryName, id);
   return getComedian(id);
 }
 
@@ -378,12 +396,13 @@ export function restoreBackup(input: unknown): RestoreSummary {
         name,
         tmdb_person_id,
         profile_path,
+        homepage,
         place_of_birth,
         country_code,
         country_name,
         created_at,
         last_scanned_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const comedian of backup.comedians) {
       insertComedian.run(
@@ -391,6 +410,7 @@ export function restoreBackup(input: unknown): RestoreSummary {
         comedian.name,
         comedian.tmdbPersonId,
         comedian.profilePath,
+        comedian.homepage,
         comedian.placeOfBirth,
         comedian.countryCode,
         comedian.countryName,
@@ -494,6 +514,7 @@ function parseBackup(input: unknown): BackupData {
       name: requireString(comedian.name, `comedians[${index}].name`),
       tmdbPersonId,
       profilePath: requireNullableString(comedian.profilePath, `comedians[${index}].profilePath`),
+      homepage: requireNullableString(comedian.homepage, `comedians[${index}].homepage`),
       placeOfBirth: requireNullableString(comedian.placeOfBirth, `comedians[${index}].placeOfBirth`),
       countryCode: requireNullableString(comedian.countryCode, `comedians[${index}].countryCode`),
       countryName: requireNullableString(comedian.countryName, `comedians[${index}].countryName`),

@@ -50,6 +50,10 @@ export type PersonSearchResult = {
   tmdbPersonId: number;
   name: string;
   profilePath: string | null;
+  knownForDepartment: string | null;
+  placeOfBirth: string | null;
+  countryCode: string | null;
+  countryName: string | null;
   knownFor: string[];
 };
 
@@ -58,6 +62,7 @@ export type Comedian = {
   name: string;
   tmdbPersonId: number | null;
   profilePath: string | null;
+  homepage: string | null;
   placeOfBirth: string | null;
   countryCode: string | null;
   countryName: string | null;
