@@ -21,7 +21,7 @@ Movie databases are not especially tidy about stand-up. Specials can be listed a
 - Remember ignored/rejected items across rescans.
 - Backup and restore everything, including settings and review decisions.
 - Light, dark, and system themes.
-- Interface languages: English (UK), English (US), and French.
+- Interface languages: English (UK), English (US), and French (AI translated, sorry if any errors!).
 - Can use a hosted metadata service for easy setup, or your own TMDB API key for the most reliable long-term install.
 
 ## How It Works
