@@ -15,7 +15,7 @@ Point Chucklarr at the deployed URL with:
 
 ```env
 CHUCKLARR_METADATA_SOURCE=service
-CHUCKLARR_METADATA_SERVICE_URL=https://chucklarr-metadata.martinjsteven.workers.dev
+CHUCKLARR_METADATA_SERVICE_URL=https://{your-worker-name}.{your-cloudflare-account}.workers.dev
 ```
 
 ## Endpoints
