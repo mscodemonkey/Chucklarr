@@ -1,5 +1,7 @@
 node_modules
+**/node_modules
 dist
+metadata-worker/.wrangler
 data/*.db
 data/*.db-*
 .env

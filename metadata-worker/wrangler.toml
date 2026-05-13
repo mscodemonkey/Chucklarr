@@ -1,0 +1,6 @@
+name = "chucklarr-metadata"
+main = "src/index.ts"
+compatibility_date = "2026-05-13"
+
+[vars]
+CACHE_TTL_SECONDS = "86400"

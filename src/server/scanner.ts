@@ -38,17 +38,22 @@ export async function scanComedian(comedianId: number): Promise<ScanResult> {
     let radarrMovieId = radarrMovie?.id ?? null;
     let reasons = alreadyInRadarr ? [...score.reasons, 'Already in Radarr'] : score.reasons;
 
+    if (!alreadyInRadarr && existingCandidate?.status === 'ignored') {
+      status = 'ignored';
+      reasons = [...reasons, 'Previously ignored'];
+    }
+
     if (!alreadyInRadarr && existingCandidate?.status === 'rejected') {
       status = 'rejected';
       reasons = [...reasons, 'Previously rejected'];
     }
 
-    if (!alreadyInRadarr && score.confidence < hideBelowThreshold) {
+    if (!alreadyInRadarr && status === 'new' && score.confidence < hideBelowThreshold) {
       status = 'ignored';
       reasons = [...reasons, `Below ${hideBelowThreshold} hide threshold`];
     }
 
-    if (!alreadyInRadarr && existingCandidate?.status !== 'rejected' && score.confidence >= autoAddThreshold && radarr.configured) {
+    if (!alreadyInRadarr && status === 'new' && score.confidence >= autoAddThreshold && radarr.configured) {
       try {
         const addedMovie = await radarr.addMovie({
           id: 0,

@@ -1,6 +1,10 @@
 export type CandidateStatus = 'new' | 'auto_added' | 'approved' | 'ignored' | 'rejected';
 
 export type AppSettings = {
+  language: string;
+  theme: string;
+  metadataSource: string;
+  metadataServiceUrl: string;
   tmdbBearerToken: string;
   radarrUrl: string;
   radarrApiKey: string;
@@ -9,6 +13,8 @@ export type AppSettings = {
   radarrMinimumAvailability: string;
   autoAddConfidenceThreshold: string;
   hideBelowConfidenceThreshold: string;
+  automaticDailyScanTime: string;
+  automaticDailyScanLastRunDate: string;
 };
 
 export type RadarrQualityProfile = {
@@ -82,6 +88,21 @@ export type ScanResult = {
   found: number;
   saved: number;
   candidates: Candidate[];
+};
+
+export type BackupData = {
+  app: 'Chucklarr';
+  schemaVersion: 1;
+  exportedAt: string;
+  settings: AppSettings;
+  comedians: Comedian[];
+  candidates: Candidate[];
+};
+
+export type RestoreSummary = {
+  settings: number;
+  comedians: number;
+  candidates: number;
 };
 
 export type ApiError = {

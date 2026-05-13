@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { AppSettings, Candidate, CandidateStatus, Comedian } from '../shared/types';
+import type { AppSettings, BackupData, Candidate, CandidateStatus, Comedian, RestoreSummary } from '../shared/types';
 import { env, settingsFromEnv } from './env';
 
 fs.mkdirSync(path.dirname(env.databasePath), { recursive: true });
@@ -61,6 +61,10 @@ if (!comedianColumns.has('country_name')) {
 }
 
 const defaultSettings: AppSettings = {
+  language: 'en-GB',
+  theme: 'system',
+  metadataSource: 'service',
+  metadataServiceUrl: 'https://chucklarr-metadata.martinjsteven.workers.dev',
   tmdbBearerToken: '',
   radarrUrl: 'http://localhost:7878',
   radarrApiKey: '',
@@ -69,6 +73,8 @@ const defaultSettings: AppSettings = {
   radarrMinimumAvailability: 'released',
   autoAddConfidenceThreshold: '95',
   hideBelowConfidenceThreshold: '60',
+  automaticDailyScanTime: '',
+  automaticDailyScanLastRunDate: '',
   ...settingsFromEnv()
 };
 const envSettings = settingsFromEnv();
@@ -239,7 +245,8 @@ export function upsertCandidate(input: {
       reasons_json = excluded.reasons_json,
       status = CASE
         WHEN excluded.radarr_movie_id IS NOT NULL THEN excluded.status
-        WHEN candidates.status IN ('new', 'ignored') THEN excluded.status
+        WHEN candidates.status IN ('ignored', 'rejected', 'approved', 'auto_added') THEN candidates.status
+        WHEN candidates.status = 'new' THEN excluded.status
         ELSE candidates.status
       END,
       radarr_movie_id = COALESCE(excluded.radarr_movie_id, candidates.radarr_movie_id),
@@ -309,4 +316,284 @@ export function markCandidateRemovedFromRadarr(id: number): Candidate | null {
     WHERE id = ?
   `).run(id);
   return getCandidate(id);
+}
+
+export function createBackup(): BackupData {
+  return {
+    app: 'Chucklarr',
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    settings: getSettings(),
+    comedians: listComedians(),
+    candidates: listCandidates()
+  };
+}
+
+export function restoreBackup(input: unknown): RestoreSummary {
+  const backup = parseBackup(input);
+  const settingKeys = Object.keys(defaultSettings) as Array<keyof AppSettings>;
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('DELETE FROM candidates').run();
+    db.prepare('DELETE FROM comedians').run();
+    db.prepare('DELETE FROM settings').run();
+
+    const insertSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
+    for (const key of settingKeys) {
+      insertSetting.run(key, backup.settings[key]);
+    }
+
+    const insertComedian = db.prepare(`
+      INSERT INTO comedians (
+        id,
+        name,
+        tmdb_person_id,
+        profile_path,
+        place_of_birth,
+        country_code,
+        country_name,
+        created_at,
+        last_scanned_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const comedian of backup.comedians) {
+      insertComedian.run(
+        comedian.id,
+        comedian.name,
+        comedian.tmdbPersonId,
+        comedian.profilePath,
+        comedian.placeOfBirth,
+        comedian.countryCode,
+        comedian.countryName,
+        comedian.createdAt,
+        comedian.lastScannedAt
+      );
+    }
+
+    const insertCandidate = db.prepare(`
+      INSERT INTO candidates (
+        id,
+        comedian_id,
+        tmdb_movie_id,
+        title,
+        year,
+        overview,
+        poster_path,
+        release_date,
+        confidence,
+        reasons_json,
+        status,
+        radarr_movie_id,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const candidate of backup.candidates) {
+      insertCandidate.run(
+        candidate.id,
+        candidate.comedianId,
+        candidate.tmdbMovieId,
+        candidate.title,
+        candidate.year,
+        candidate.overview,
+        candidate.posterPath,
+        candidate.releaseDate,
+        candidate.confidence,
+        JSON.stringify(candidate.reasons),
+        candidate.status,
+        candidate.radarrMovieId,
+        candidate.createdAt,
+        candidate.updatedAt
+      );
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return {
+    settings: settingKeys.length,
+    comedians: backup.comedians.length,
+    candidates: backup.candidates.length
+  };
+}
+
+function parseBackup(input: unknown): BackupData {
+  const record = requireRecord(input, 'Backup file');
+  if (record.app !== 'Chucklarr') {
+    throw new Error('Backup file is not a Chucklarr backup.');
+  }
+  if (record.schemaVersion !== 1) {
+    throw new Error('Unsupported backup version.');
+  }
+
+  const settingKeys = Object.keys(defaultSettings) as Array<keyof AppSettings>;
+  const settingsRecord = requireRecord(record.settings, 'Backup settings');
+  const settings = { ...defaultSettings };
+  for (const key of settingKeys) {
+    const value = settingsRecord[key];
+    if (value !== undefined) {
+      settings[key] = requireString(value, `settings.${key}`);
+    }
+  }
+
+  const comediansInput = requireArray(record.comedians, 'Backup comedians');
+  const comedianIds = new Set<number>();
+  const tmdbPersonIds = new Set<number>();
+  const comedians = comediansInput.map((value, index): Comedian => {
+    const comedian = requireRecord(value, `comedians[${index}]`);
+    const id = requirePositiveInteger(comedian.id, `comedians[${index}].id`);
+    if (comedianIds.has(id)) {
+      throw new Error(`Duplicate comedian id in backup: ${id}.`);
+    }
+    comedianIds.add(id);
+
+    const tmdbPersonId = requireNullablePositiveInteger(comedian.tmdbPersonId, `comedians[${index}].tmdbPersonId`);
+    if (tmdbPersonId != null) {
+      if (tmdbPersonIds.has(tmdbPersonId)) {
+        throw new Error(`Duplicate TMDB person id in backup: ${tmdbPersonId}.`);
+      }
+      tmdbPersonIds.add(tmdbPersonId);
+    }
+
+    return {
+      id,
+      name: requireString(comedian.name, `comedians[${index}].name`),
+      tmdbPersonId,
+      profilePath: requireNullableString(comedian.profilePath, `comedians[${index}].profilePath`),
+      placeOfBirth: requireNullableString(comedian.placeOfBirth, `comedians[${index}].placeOfBirth`),
+      countryCode: requireNullableString(comedian.countryCode, `comedians[${index}].countryCode`),
+      countryName: requireNullableString(comedian.countryName, `comedians[${index}].countryName`),
+      createdAt: requireString(comedian.createdAt, `comedians[${index}].createdAt`),
+      lastScannedAt: requireNullableString(comedian.lastScannedAt, `comedians[${index}].lastScannedAt`)
+    };
+  });
+
+  const candidatesInput = requireArray(record.candidates, 'Backup candidates');
+  const candidateIds = new Set<number>();
+  const candidateKeys = new Set<string>();
+  const candidates = candidatesInput.map((value, index): Candidate => {
+    const candidate = requireRecord(value, `candidates[${index}]`);
+    const id = requirePositiveInteger(candidate.id, `candidates[${index}].id`);
+    if (candidateIds.has(id)) {
+      throw new Error(`Duplicate candidate id in backup: ${id}.`);
+    }
+    candidateIds.add(id);
+
+    const comedianId = requirePositiveInteger(candidate.comedianId, `candidates[${index}].comedianId`);
+    if (!comedianIds.has(comedianId)) {
+      throw new Error(`Candidate ${id} references a missing comedian.`);
+    }
+
+    const tmdbMovieId = requirePositiveInteger(candidate.tmdbMovieId, `candidates[${index}].tmdbMovieId`);
+    const candidateKey = `${comedianId}:${tmdbMovieId}`;
+    if (candidateKeys.has(candidateKey)) {
+      throw new Error(`Duplicate candidate movie for comedian ${comedianId}: ${tmdbMovieId}.`);
+    }
+    candidateKeys.add(candidateKey);
+
+    const status = requireString(candidate.status, `candidates[${index}].status`) as CandidateStatus;
+    if (!['new', 'auto_added', 'approved', 'ignored', 'rejected'].includes(status)) {
+      throw new Error(`Invalid candidate status in backup: ${status}.`);
+    }
+
+    return {
+      id,
+      comedianId,
+      comedianName:
+        typeof candidate.comedianName === 'string'
+          ? candidate.comedianName
+          : comedians.find((comedian) => comedian.id === comedianId)?.name ?? '',
+      tmdbMovieId,
+      title: requireString(candidate.title, `candidates[${index}].title`),
+      year: requireNullableInteger(candidate.year, `candidates[${index}].year`),
+      overview: requireString(candidate.overview, `candidates[${index}].overview`),
+      posterPath: requireNullableString(candidate.posterPath, `candidates[${index}].posterPath`),
+      releaseDate: requireNullableString(candidate.releaseDate, `candidates[${index}].releaseDate`),
+      confidence: requireConfidence(candidate.confidence, `candidates[${index}].confidence`),
+      reasons: requireStringArray(candidate.reasons, `candidates[${index}].reasons`),
+      status,
+      radarrMovieId: requireNullablePositiveInteger(candidate.radarrMovieId, `candidates[${index}].radarrMovieId`),
+      createdAt: requireString(candidate.createdAt, `candidates[${index}].createdAt`),
+      updatedAt: requireString(candidate.updatedAt, `candidates[${index}].updatedAt`)
+    };
+  });
+
+  return {
+    app: 'Chucklarr',
+    schemaVersion: 1,
+    exportedAt: requireString(record.exportedAt, 'exportedAt'),
+    settings,
+    comedians,
+    candidates
+  };
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array.`);
+  }
+  return value;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requireNullableString(value: unknown, label: string): string | null {
+  if (value == null) {
+    return null;
+  }
+  return requireString(value, label);
+}
+
+function requirePositiveInteger(value: unknown, label: string): number {
+  if (!Number.isInteger(value) || Number(value) <= 0) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return Number(value);
+}
+
+function requireNullablePositiveInteger(value: unknown, label: string): number | null {
+  if (value == null) {
+    return null;
+  }
+  return requirePositiveInteger(value, label);
+}
+
+function requireNullableInteger(value: unknown, label: string): number | null {
+  if (value == null) {
+    return null;
+  }
+  if (!Number.isInteger(value)) {
+    throw new Error(`${label} must be an integer.`);
+  }
+  return Number(value);
+}
+
+function requireConfidence(value: unknown, label: string): number {
+  if (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 100) {
+    throw new Error(`${label} must be an integer from 0 to 100.`);
+  }
+  return Number(value);
+}
+
+function requireStringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new Error(`${label} must be an array of strings.`);
+  }
+  return value;
 }

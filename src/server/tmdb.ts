@@ -44,13 +44,17 @@ export type TmdbMovieDetails = {
 
 export class TmdbClient {
   private readonly token: string;
+  private readonly metadataSource: string;
+  private readonly metadataServiceUrl: string;
 
   constructor(settings: AppSettings) {
     this.token = settings.tmdbBearerToken.trim();
+    this.metadataSource = settings.metadataSource === 'tmdb' ? 'tmdb' : 'service';
+    this.metadataServiceUrl = settings.metadataServiceUrl.trim().replace(/\/+$/, '');
   }
 
   get configured(): boolean {
-    return this.token.length > 0;
+    return this.metadataSource === 'service' ? this.metadataServiceUrl.length > 0 : this.token.length > 0;
   }
 
   async searchPerson(query: string): Promise<TmdbPerson | null> {
@@ -78,15 +82,23 @@ export class TmdbClient {
 
   private async request<T>(path: string): Promise<T> {
     if (!this.configured) {
-      throw new Error('TMDB bearer token is not configured.');
+      throw new Error('TMDB metadata source is not configured.');
     }
 
-    const response = await fetch(`https://api.themoviedb.org/3${path}`, {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: 'application/json'
-      }
-    });
+    const response =
+      this.metadataSource === 'service'
+        ? await fetch(`${this.metadataServiceUrl}/tmdb${path}`, {
+            headers: {
+              Accept: 'application/json',
+              'X-Chucklarr-Client': 'chucklarr'
+            }
+          })
+        : await fetch(`https://api.themoviedb.org/3${path}`, {
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              Accept: 'application/json'
+            }
+          });
 
     if (!response.ok) {
       const text = await response.text();

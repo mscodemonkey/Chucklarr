@@ -3,12 +3,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createComedian,
+  createBackup,
   deleteComedian,
   getCandidate,
   getSettings,
   listCandidates,
   listComedians,
   markCandidateRemovedFromRadarr,
+  restoreBackup,
   updateComedianOrigin,
   updateCandidateStatus,
   updateSettings
@@ -17,6 +19,7 @@ import { env } from './env';
 import { originFromPlaceOfBirth } from './origin';
 import { RadarrClient } from './radarr';
 import { scanAllComedians, scanComedian } from './scanner';
+import { startDailyScanScheduler } from './scheduler';
 import { TmdbClient } from './tmdb';
 import type { AppSettings, CandidateStatus, PersonSearchResult } from '../shared/types';
 
@@ -24,7 +27,7 @@ const app = express();
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(dirname, '../client');
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 function asyncRoute(handler: express.RequestHandler): express.RequestHandler {
   return (request, response, next) => {
@@ -42,6 +45,21 @@ app.get('/api/settings', (_request, response) => {
 
 app.put('/api/settings', (request, response) => {
   response.json(updateSettings(request.body));
+});
+
+app.get('/api/backup', (_request, response) => {
+  const backup = createBackup();
+  const timestamp = backup.exportedAt.replace(/[:.]/g, '-');
+  response.setHeader('Content-Disposition', `attachment; filename="chucklarr-backup-${timestamp}.json"`);
+  response.json(backup);
+});
+
+app.post('/api/backup/restore', (request, response) => {
+  try {
+    response.json(restoreBackup(request.body));
+  } catch (caught) {
+    response.status(400).json({ error: caught instanceof Error ? caught.message : 'Invalid backup file.' });
+  }
 });
 
 app.get(
@@ -268,4 +286,5 @@ app.use((error: Error, _request: express.Request, response: express.Response, _n
 
 app.listen(env.port, () => {
   console.log(`Chucklarr listening on http://localhost:${env.port}`);
+  startDailyScanScheduler();
 });
