@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Chucklarr">
+  <rect width="512" height="512" rx="112" fill="#177e89" />
+  <circle cx="256" cy="256" r="182" fill="none" stroke="#fffdfa" stroke-width="34" />
+  <path
+    d="M168 196l54 48-54 48M344 196l-54 48 54 48"
+    fill="none"
+    stroke="#fffdfa"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="34"
+  />
+  <path
+    d="M164 322h184c-16 58-53 86-92 86s-76-28-92-86z"
+    fill="none"
+    stroke="#fffdfa"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="34"
+  />
+</svg>
