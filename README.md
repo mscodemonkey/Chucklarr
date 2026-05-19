@@ -242,6 +242,8 @@ That directory is mounted into the container by `docker-compose.yml`, so it surv
 - Added Docker startup update checks against GitHub, plus an in-app update banner and explicit `Update now` action for eligible Docker builds.
 - Fixed candidate card layout so long titles and metadata truncate inside the card instead of pushing the confidence score out of bounds.
 - Added Chucklarr app icons and web manifest metadata so mobile home-screen shortcuts use the face mark instead of a generated letter tile.
+- Refined the comedian detail experience with shared card layouts for monitored and unmonitored specials, poster thumbnails, clearer available/monitored grouping, compact mobile tabs, 44px touch targets, and tighter responsive metadata.
+- Fixed removed Radarr candidates so rejected items can be added back to Radarr from the review list.
 
 ## Local Development
 
