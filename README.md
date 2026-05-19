@@ -260,13 +260,19 @@ Run the API and Vite dev server:
 npm run dev
 ```
 
-Open:
+For Docker and production builds, open the app at:
+
+```text
+http://localhost:3333
+```
+
+When running `npm run dev`, Vite serves the frontend separately at:
 
 ```text
 http://localhost:5173
 ```
 
-The API runs on:
+The development frontend proxies API requests to the app/API server at:
 
 ```text
 http://localhost:3333
