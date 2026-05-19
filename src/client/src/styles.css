@@ -130,7 +130,7 @@ button {
   display: inline-flex;
   gap: 8px;
   justify-content: center;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 12px;
 }
 
@@ -145,7 +145,7 @@ select {
   border: 1px solid var(--field-border);
   border-radius: 7px;
   color: var(--text);
-  height: 40px;
+  height: 44px;
   outline: none;
   padding: 0 11px;
   width: 100%;
@@ -264,8 +264,9 @@ h3 {
 .toast button {
   background: var(--surface);
   border: 0;
-  min-height: 28px;
+  min-height: 44px;
   padding: 0 5px;
+  width: 44px;
 }
 
 .updateBanner {
@@ -394,28 +395,25 @@ h3 {
 .detailLinks {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 12px;
+  margin-top: 7px;
 }
 
 .detailLinks a {
   align-items: center;
-  border: 1px solid var(--field-border);
-  border-radius: 999px;
   color: var(--primary);
   display: inline-flex;
   font-size: 13px;
   font-weight: 800;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 11px;
+  gap: 5px;
+  min-height: 0;
+  padding: 0;
   text-decoration: none;
 }
 
 .detailLinks a:hover {
-  background: var(--primary-soft);
-  border-color: rgba(23, 126, 137, 0.38);
   color: var(--primary-strong);
+  text-decoration: underline;
 }
 
 .settingsGrid {
@@ -638,15 +636,15 @@ label {
   min-width: 0;
 }
 
-.personMatch strong,
-.personMatch span {
+.personMatchName,
+.personMatchKnownFor {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.personMatch span {
+.personMatchKnownFor {
   color: var(--text-muted);
   font-size: 13px;
   margin-top: 3px;
@@ -655,11 +653,13 @@ label {
 .personMatchTitle {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
 
-.personMatchTitle strong {
+.personMatchName {
+  flex: 1 1 64px;
   min-width: 0;
 }
 
@@ -681,12 +681,13 @@ label {
   font-weight: 800;
   line-height: 1;
   margin-top: 0;
-  max-width: 120px;
   padding: 4px 7px;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.listDivider {
+.listDivider,
+.mediaGroupTitle {
   align-items: center;
   color: var(--text-strong);
   display: flex;
@@ -695,6 +696,16 @@ label {
   letter-spacing: 0;
   margin: 0 0 0 4px;
   text-transform: uppercase;
+}
+
+.monitoredGroups {
+  display: grid;
+  gap: 14px;
+}
+
+.mediaGroup {
+  display: grid;
+  gap: 5px;
 }
 
 .comedianList {
@@ -778,16 +789,17 @@ label {
 }
 
 .resultCounter {
-  background: var(--surface-muted);
-  border: 1px solid var(--field-border);
-  border-radius: 999px;
   color: var(--text-muted);
   flex: 0 0 auto;
   font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
+  font-weight: 750;
+  line-height: 1.25;
   margin-top: 0;
-  padding: 5px 8px;
+  padding: 0;
+}
+
+.resultCounterCompact {
+  display: none;
 }
 
 .newReviewBadge {
@@ -817,8 +829,6 @@ label {
 }
 
 .comedianItem.selected .resultCounter {
-  background: var(--primary-soft);
-  border-color: rgba(23, 126, 137, 0.38);
   color: var(--primary-strong);
 }
 
@@ -853,9 +863,9 @@ label {
 }
 
 .rowActions button {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0;
-  width: 38px;
+  width: 44px;
 }
 
 .spin {
@@ -901,7 +911,7 @@ label {
   display: inline-flex;
   gap: 8px;
   font-weight: 800;
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 10px;
 }
 
@@ -975,51 +985,131 @@ label {
 
 .monitoredList {
   display: grid;
-  gap: 10px;
+  gap: 13px;
 }
 
-.monitoredItem {
-  align-items: center;
+.mediaCard {
+  align-items: start;
   backdrop-filter: blur(18px) saturate(140%);
   background: var(--glass-card);
   border: 1px solid var(--glass-border);
   border-radius: 8px;
   box-shadow: inset 0 1px 0 var(--glass-highlight);
   display: grid;
-  gap: 12px;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  padding: 12px;
+  gap: 14px;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+}
+
+.mediaPoster {
+  align-items: center;
+  align-self: start;
+  aspect-ratio: 2 / 3;
+  background: var(--poster-bg);
+  border-radius: 6px;
+  color: #ffffff;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  width: 62px;
+}
+
+.mediaPoster img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.monitoredPoster.unavailable > img,
+.monitoredPoster.unavailable > svg {
+  filter: grayscale(45%) saturate(70%);
+  opacity: 0.45;
 }
 
 .monitoredStatus {
   align-items: center;
-  background: var(--surface-muted);
-  border: 1px solid var(--field-border);
-  border-radius: 999px;
-  color: var(--text-subtle);
+  background: color-mix(in srgb, var(--surface-muted) 74%, transparent);
+  border-radius: 6px;
+  color: var(--text-muted);
   display: flex;
-  height: 34px;
+  height: 18px;
   justify-content: center;
-  width: 34px;
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+}
+
+.monitoredPoster .monitoredStatus {
+  display: flex;
+  overflow: visible;
+  white-space: normal;
 }
 
 .monitoredStatus.downloaded {
-  background: var(--success-bg);
-  border-color: var(--success-border);
+  background: color-mix(in srgb, var(--success-bg) 86%, transparent);
   color: var(--primary-strong);
 }
 
-.monitoredItem strong,
-.monitoredItem span {
+.mediaDetails {
+  align-self: start;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mediaTitle,
+.mediaByline,
+.mediaMeta {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.monitoredItem span {
+.mediaTitle {
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 800;
+  min-width: 0;
+}
+
+.mediaByline,
+.mediaMeta {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.mediaOverview {
+  color: var(--text-muted);
+  display: -webkit-box;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tmdbMetaLink {
+  align-items: center;
+  color: inherit;
+  display: inline-flex;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  text-decoration: none;
+  vertical-align: top;
+}
+
+.tmdbMetaLink:hover {
+  color: var(--primary);
+}
+
+.tmdbMetaLink svg {
+  flex: 0 0 auto;
 }
 
 .tmdbTitleLink {
@@ -1050,129 +1140,48 @@ label {
   white-space: nowrap;
 }
 
-.monitoredActions {
+.mediaActions {
+  align-self: end;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  grid-column: 3;
+  grid-row: 1;
   justify-content: end;
 }
 
-.monitoredActions button {
-  min-height: 36px;
-  padding: 0 11px;
+.monitoredActions button,
+.candidateActions button {
+  min-height: 44px;
+  padding: 0;
+  width: 44px;
 }
 
-.candidate {
-  backdrop-filter: blur(18px) saturate(140%);
-  background: var(--glass-card);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
-  box-shadow: inset 0 1px 0 var(--glass-highlight);
-  display: grid;
-  grid-template-columns: clamp(72px, 22vw, 80px) minmax(0, 1fr);
-  min-height: 0;
-  overflow: hidden;
-  padding: 12px;
-}
-
-.poster {
-  align-items: center;
-  align-self: start;
-  aspect-ratio: 2 / 3;
-  background: var(--poster-bg);
-  border-radius: 7px;
-  color: #ffffff;
-  display: flex;
-  justify-content: center;
-  overflow: hidden;
-  width: 100%;
-}
-
-.poster img {
-  object-fit: contain;
-}
-
-.candidateBody {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  padding: 0 0 0 10px;
-}
-
-.candidateTop {
-  align-items: start;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  min-width: 0;
-}
-
-.candidateTop > div {
-  min-width: 0;
-}
-
-.candidateTop h3 {
-  font-size: 16px;
-  line-height: 1.12;
-  min-width: 0;
-}
-
-.candidateTop p {
-  color: var(--text-muted);
-  display: block;
-  font-size: 13px;
-  margin-top: 3px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.monitoredActions .buttonText,
+.candidateActions .buttonText {
+  display: none;
 }
 
 .score {
   align-items: center;
   background: var(--danger-bg);
-  border-radius: 7px;
+  border-radius: 999px;
   color: var(--danger-text);
   display: flex;
   flex: 0 0 auto;
-  height: 38px;
+  font-size: 13px;
+  grid-column: 3;
+  grid-row: 1;
   justify-content: center;
-  width: 42px;
+  justify-self: end;
+  height: 30px;
+  align-self: start;
+  width: 30px;
 }
 
 .score.high {
   background: var(--success-bg);
   color: var(--primary-strong);
-}
-
-.overview {
-  color: var(--text-muted);
-  display: -webkit-box;
-  font-size: 14px;
-  line-height: 1.45;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.candidateStatus {
-  color: var(--text-subtle);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.candidateActions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  grid-column: 1 / -1;
-  padding: 8px 0 0;
-}
-
-.candidateActions button {
-  min-height: 38px;
 }
 
 .empty {
@@ -1201,6 +1210,10 @@ label {
   margin-bottom: 6px;
 }
 
+.detailLoadingState svg {
+  color: var(--primary);
+}
+
 .detailEmptyState strong {
   color: var(--text-strong);
   font-size: 20px;
@@ -1210,17 +1223,6 @@ label {
   font-size: 16px;
   line-height: 1.25;
   max-width: 360px;
-}
-
-@media (max-width: 1200px) {
-  .monitoredActions button {
-    padding: 0;
-    width: 38px;
-  }
-
-  .monitoredActions .buttonText {
-    display: none;
-  }
 }
 
 @media (min-width: 1024px) and (max-width: 1199px) {
@@ -1315,18 +1317,15 @@ label {
 
   .mobileBack {
     display: inline-flex;
-    min-height: 34px;
+    min-height: 44px;
     padding: 0;
-    width: 36px;
+    width: 44px;
   }
 
-  .desktopTabs,
-  .desktopTabPanels {
-    display: none;
-  }
-
-  .detailSections {
-    display: grid;
+  .desktopTabs {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
 
 }
@@ -1359,13 +1358,21 @@ label {
   }
 
   .topbarActions button {
-    min-height: 40px;
+    min-height: 44px;
     padding: 0;
-    width: 40px;
+    width: 44px;
   }
 
   .topbarActions .actionLabel {
     display: none;
+  }
+
+  .resultCounterFull {
+    display: none;
+  }
+
+  .resultCounterCompact {
+    display: inline;
   }
 
   .addRow,
@@ -1392,14 +1399,19 @@ label {
     width: 100%;
   }
 
-  .monitoredItem {
+  .mediaCard {
     align-items: start;
-    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    padding: 12px;
   }
 
-  .monitoredActions {
-    grid-column: 2;
-    justify-content: start;
+  .mediaPoster {
+    width: 52px;
+  }
+
+  .mediaActions {
+    grid-column: 3;
+    justify-content: end;
   }
 
 }

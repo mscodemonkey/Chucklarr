@@ -79,6 +79,18 @@ function countryFlag(countryCode: string | null): string | null {
   return String.fromCodePoint(...[...countryCode].map((letter) => 127397 + letter.charCodeAt(0)));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function titleWithoutComedianName(title: string, comedianName: string | null): string {
+  if (!comedianName) {
+    return title;
+  }
+
+  return title.replace(new RegExp(`^\\s*${escapeRegExp(comedianName)}\\s*[:\\-–—]\\s*`, 'i'), '').trim() || title;
+}
+
 function LaughMark() {
   return (
     <svg className="laughMark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -148,6 +160,7 @@ function App() {
     [comedians, selectedComedianId]
   );
   const selectedComedianScanning = selectedComedian ? busy === `scan-${selectedComedian.id}` : false;
+  const addingComedian = busy === 'add-comedian' || addingPersonId !== null;
   const monitoredRadarrIds = useMemo(() => new Set(monitoredMovies.map((movie) => movie.id)), [monitoredMovies]);
   const monitoredTmdbIds = useMemo(
     () => new Set(monitoredMovies.map((movie) => movie.tmdbId).filter((id): id is number => id != null)),
@@ -183,34 +196,47 @@ function App() {
     [notMonitoredCandidates]
   );
   const comedianResultCounts = useMemo(() => {
-    const grouped = new Map<number, Map<number, boolean>>();
+    type ResultState = 'none' | 'monitored' | 'available';
+    const stateRank: Record<ResultState, number> = {
+      none: 0,
+      monitored: 1,
+      available: 2
+    };
+    const grouped = new Map<number, Map<number, ResultState>>();
 
     for (const candidate of candidates) {
       if (isWeakRadarrOnlyMatch(candidate)) {
         continue;
       }
 
-      const comedianCandidates = grouped.get(candidate.comedianId) ?? new Map<number, boolean>();
-      const alreadyMonitored = comedianCandidates.get(candidate.tmdbMovieId) ?? false;
-      const isMonitored =
-        alreadyMonitored ||
-        monitoredTmdbIds.has(candidate.tmdbMovieId) ||
-        (candidate.radarrMovieId != null && monitoredRadarrIds.has(candidate.radarrMovieId));
+      const comedianCandidates = grouped.get(candidate.comedianId) ?? new Map<number, ResultState>();
+      const existingState = comedianCandidates.get(candidate.tmdbMovieId) ?? 'none';
+      const radarrMovie =
+        (candidate.radarrMovieId == null ? null : monitoredMovieByRadarrId.get(candidate.radarrMovieId)) ??
+        monitoredMovieByTmdbId.get(candidate.tmdbMovieId);
+      const nextState: ResultState = radarrMovie?.hasFile ? 'available' : radarrMovie ? 'monitored' : 'none';
+      const resultState = stateRank[nextState] > stateRank[existingState] ? nextState : existingState;
 
-      comedianCandidates.set(candidate.tmdbMovieId, isMonitored);
+      comedianCandidates.set(candidate.tmdbMovieId, resultState);
       grouped.set(candidate.comedianId, comedianCandidates);
     }
 
     return new Map(
-      [...grouped.entries()].map(([comedianId, comedianCandidates]) => [
-        comedianId,
-        {
-          monitored: [...comedianCandidates.values()].filter(Boolean).length,
-          total: comedianCandidates.size
-        }
-      ])
+      [...grouped.entries()].map(([comedianId, comedianCandidates]) => {
+        const states = [...comedianCandidates.values()];
+        const available = states.filter((state) => state === 'available').length;
+        return [
+          comedianId,
+          {
+            available,
+            monitored: states.filter((state) => state === 'monitored').length,
+            remaining: comedianCandidates.size - available,
+            total: comedianCandidates.size
+          }
+        ];
+      })
     );
-  }, [candidates, monitoredRadarrIds, monitoredTmdbIds]);
+  }, [candidates, monitoredMovieByRadarrId, monitoredMovieByTmdbId]);
   const comedianNewReviewCounts = useMemo(() => {
     const grouped = new Map<number, Set<number>>();
 
@@ -256,6 +282,8 @@ function App() {
       })
       .sort((first, second) => first.movie.title.localeCompare(second.movie.title));
   }, [candidates, monitoredMovieByRadarrId, monitoredMovieByTmdbId, selectedComedianId]);
+  const availableMonitoredRows = useMemo(() => visibleMonitoredRows.filter(({ movie }) => Boolean(movie.hasFile)), [visibleMonitoredRows]);
+  const pendingMonitoredRows = useMemo(() => visibleMonitoredRows.filter(({ movie }) => !movie.hasFile), [visibleMonitoredRows]);
   const hasReviewCandidates = reviewCandidates.length > 0;
   const hasMonitoredRows = visibleMonitoredRows.length > 0;
   const hasNotMonitoredCandidates = ignoredNotMonitoredCandidates.length > 0;
@@ -570,6 +598,7 @@ function App() {
     setBusy('add-comedian');
     setError(null);
     setNotice(null);
+    setDetailOpen(true);
 
     try {
       const comedian = await api<Comedian>('/api/comedians', {
@@ -1060,7 +1089,7 @@ function App() {
                           </div>
                           <div>
                             <div className="personMatchTitle">
-                              <strong>{match.name}</strong>
+                              <strong className="personMatchName">{match.name}</strong>
                               {match.matchReasons && match.matchReasons.length > 0 && (
                                 <span className="comedianSignal" title={match.matchReasons.join(', ')}>
                                   {_t('comedians.likelyComedian')}
@@ -1076,7 +1105,9 @@ function App() {
                                 </span>
                               )}
                             </div>
-                            <span>{match.knownFor.length > 0 ? match.knownFor.join(' · ') : `TMDB ${match.tmdbPersonId}`}</span>
+                            <span className="personMatchKnownFor">
+                              {match.knownFor.length > 0 ? match.knownFor.join(' · ') : `TMDB ${match.tmdbPersonId}`}
+                            </span>
                           </div>
                           <button
                             type="button"
@@ -1123,7 +1154,7 @@ function App() {
                   {comedians.map((comedian) => {
                     const isScanning = busy === `scan-${comedian.id}`;
                     const selected = selectedComedianId === comedian.id;
-                    const resultCount = comedianResultCounts.get(comedian.id) ?? { monitored: 0, total: 0 };
+                    const resultCount = comedianResultCounts.get(comedian.id) ?? { available: 0, monitored: 0, remaining: 0, total: 0 };
                     const newReviewCount = comedianNewReviewCounts.get(comedian.id) ?? 0;
                     const flag = countryFlag(comedian.countryCode);
                     const reviewSuffix =
@@ -1149,8 +1180,9 @@ function App() {
                           className="comedianSelect"
                           aria-label={_t('comedians.openRow', {
                             name: comedian.name,
+                            available: resultCount.available,
                             monitored: resultCount.monitored,
-                            total: resultCount.total,
+                            remaining: resultCount.remaining,
                             reviewSuffix
                           })}
                           aria-pressed={selected}
@@ -1190,10 +1222,33 @@ function App() {
                                 </span>
                               )}
                               <span
-                                className="resultCounter"
-                                title={_t('comedians.resultCounterTitle', { monitored: resultCount.monitored, total: resultCount.total })}
+                                className="resultCounter resultCounterFull"
+                                title={_t('comedians.resultCounterTitle', {
+                                  available: resultCount.available,
+                                  monitored: resultCount.monitored,
+                                  remaining: resultCount.remaining,
+                                  total: resultCount.total
+                                })}
                               >
-                                {_t('comedians.resultCounter', { monitored: resultCount.monitored, total: resultCount.total })}
+                                {_t('comedians.resultCounter', {
+                                  available: resultCount.available,
+                                  monitored: resultCount.monitored,
+                                  remaining: resultCount.remaining
+                                })}
+                              </span>
+                              <span
+                                className="resultCounter resultCounterCompact"
+                                title={_t('comedians.resultCounterTitle', {
+                                  available: resultCount.available,
+                                  monitored: resultCount.monitored,
+                                  remaining: resultCount.remaining,
+                                  total: resultCount.total
+                                })}
+                              >
+                                {_t('comedians.resultCounterCompact', {
+                                  available: resultCount.available,
+                                  total: resultCount.total
+                                })}
                               </span>
                             </span>
                           </span>
@@ -1272,7 +1327,13 @@ function App() {
               </div>
             </div>
             )}
-            {!selectedComedian ? (
+            {!selectedComedian && addingComedian ? (
+              <div className="detailEmptyState detailLoadingState" role="status" aria-live="polite">
+                <RefreshCcw className="spin" size={34} aria-hidden="true" />
+                <strong>{_t('detail.addingComedianTitle')}</strong>
+                <span>{_t('detail.addingComedianHint')}</span>
+              </div>
+            ) : !selectedComedian ? (
               <div className="detailEmptyState">
                 <Film size={56} strokeWidth={1.8} aria-hidden="true" />
                 <strong>{_t('detail.noSelectionTitle')}</strong>
@@ -1334,16 +1395,23 @@ function App() {
                 </div>
               )}
               {activeDetailTab === 'monitored' && (
-                <div className="monitoredList">
-                  {visibleMonitoredRows.map(({ movie, candidate }) => (
-                    <MonitoredMovieRow key={movie.id} movie={movie} candidate={candidate} busy={busy} run={run} _t={_t} />
-                  ))}
+                <>
+                  {hasMonitoredRows && (
+                    <MonitoredRowsList
+                      availableRows={availableMonitoredRows}
+                      monitoredRows={pendingMonitoredRows}
+                      comedianName={selectedComedian?.name ?? null}
+                      busy={busy}
+                      run={run}
+                      _t={_t}
+                    />
+                  )}
                   {visibleMonitoredRows.length === 0 && !selectedComedianScanning && (
                     <p className="empty">
                       {selectedComedian ? _t('empty.noMonitored') : _t('empty.chooseMonitored')}
                     </p>
                   )}
-                </div>
+                </>
               )}
               {activeDetailTab === 'notMonitored' && (
                 <div className="candidateGrid">
@@ -1379,16 +1447,21 @@ function App() {
                     <h3>{_t('tabs.monitored')}</h3>
                     <span className="sectionCount">{visibleMonitoredRows.length}</span>
                   </div>
-                  <div className="monitoredList">
-                    {visibleMonitoredRows.map(({ movie, candidate }) => (
-                      <MonitoredMovieRow key={movie.id} movie={movie} candidate={candidate} busy={busy} run={run} _t={_t} />
-                    ))}
+                  {hasMonitoredRows && (
+                    <MonitoredRowsList
+                      availableRows={availableMonitoredRows}
+                      monitoredRows={pendingMonitoredRows}
+                      comedianName={selectedComedian?.name ?? null}
+                      busy={busy}
+                      run={run}
+                      _t={_t}
+                    />
+                  )}
                     {visibleMonitoredRows.length === 0 && !selectedComedianScanning && (
                       <p className="empty">
                         {selectedComedian ? _t('empty.noMonitored') : _t('empty.chooseMonitored')}
                       </p>
                     )}
-                  </div>
                 </section>
               )}
 
@@ -1448,62 +1521,123 @@ function TmdbMovieTitleLink({ tmdbMovieId, title }: { tmdbMovieId: number | null
   );
 }
 
+function TmdbMovieMetaLink({ tmdbMovieId }: { tmdbMovieId: number }) {
+  return (
+    <a className="tmdbMetaLink" href={`https://www.themoviedb.org/movie/${tmdbMovieId}`} target="_blank" rel="noreferrer">
+      <span>TMDB {tmdbMovieId}</span>
+      <ExternalLink size={12} aria-hidden="true" />
+    </a>
+  );
+}
+
+type MonitoredRow = {
+  movie: RadarrMonitoredMovie;
+  candidate: Candidate | null;
+};
+
+function MonitoredRowsList({
+  availableRows,
+  monitoredRows,
+  comedianName,
+  busy,
+  run,
+  _t
+}: {
+  availableRows: MonitoredRow[];
+  monitoredRows: MonitoredRow[];
+  comedianName: string | null;
+  busy: string | null;
+  run: RunFn;
+  _t: Translator;
+}) {
+  const renderRows = (rows: MonitoredRow[]) =>
+    rows.map(({ movie, candidate }) => (
+      <MonitoredMovieRow
+        key={movie.id}
+        movie={movie}
+        candidate={candidate}
+        comedianName={comedianName}
+        busy={busy}
+        run={run}
+        _t={_t}
+      />
+    ));
+
+  return (
+    <div className="monitoredGroups">
+      {availableRows.length > 0 && (
+        <section className="mediaGroup">
+          <div className="mediaGroupTitle">
+            <span>{_t('sections.availableWithCount', { count: availableRows.length })}</span>
+          </div>
+          <div className="monitoredList">{renderRows(availableRows)}</div>
+        </section>
+      )}
+      {monitoredRows.length > 0 && (
+        <section className="mediaGroup">
+          <div className="mediaGroupTitle">
+            <span>{_t('sections.monitoredWithCount', { count: monitoredRows.length })}</span>
+          </div>
+          <div className="monitoredList">{renderRows(monitoredRows)}</div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function MonitoredMovieRow({
   movie,
   candidate,
+  comedianName,
   busy,
   run,
   _t
 }: {
   movie: RadarrMonitoredMovie;
   candidate: Candidate | null;
+  comedianName: string | null;
   busy: string | null;
   run: RunFn;
   _t: Translator;
 }) {
-  const canManageRadarr = Boolean(candidate?.radarrMovieId && !movie.hasFile);
-  const unmonitoring = candidate ? busy === `unmonitor-radarr-${candidate.id}` : false;
+  const canRemoveFromRadarr = Boolean(candidate?.radarrMovieId && !movie.hasFile);
   const removing = candidate ? busy === `remove-radarr-${candidate.id}` : false;
   const tmdbMovieId = candidate?.tmdbMovieId ?? movie.tmdbId;
+  const posterPath = candidate?.posterPath ?? null;
+  const rowComedianName = candidate?.comedianName ?? comedianName;
+  const displayTitle = titleWithoutComedianName(candidate?.title ?? movie.title, rowComedianName);
+  const bylineParts = [rowComedianName, movie.year ?? candidate?.year].filter((part): part is string | number => Boolean(part));
+  const overview = candidate?.overview?.trim();
 
   return (
-    <article className="monitoredItem">
-      <div
-        className={movie.hasFile ? 'monitoredStatus downloaded' : 'monitoredStatus'}
-        title={movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
-        aria-label={movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
-        role="img"
-      >
-        {movie.hasFile ? <Check size={17} aria-hidden="true" /> : <Radar size={17} aria-hidden="true" />}
-      </div>
-      <div>
-        <strong>
-          <TmdbMovieTitleLink tmdbMovieId={tmdbMovieId} title={movie.title} />
-        </strong>
-        <span>
-          {movie.year ? `${movie.year} · ` : ''}
-          {movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
-          {movie.tmdbId ? ` · TMDB ${movie.tmdbId}` : ''}
+    <article className="mediaCard monitoredItem">
+      <div className={movie.hasFile ? 'mediaPoster monitoredPoster' : 'mediaPoster monitoredPoster unavailable'}>
+        {posterPath ? <img src={`${imageBase}${posterPath}`} alt={_t('candidate.posterAlt', { title: movie.title })} /> : <Film size={22} aria-hidden="true" />}
+        <span
+          className={movie.hasFile ? 'monitoredStatus downloaded' : 'monitoredStatus'}
+          title={movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
+          aria-label={movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
+          role="img"
+        >
+          {movie.hasFile ? <Check size={13} aria-hidden="true" /> : <Eye size={13} aria-hidden="true" />}
         </span>
       </div>
-      {canManageRadarr && candidate && (
-        <div className="monitoredActions">
-          <button
-            type="button"
-            title={unmonitoring ? _t('radarr.unmonitoring', { title: movie.title }) : _t('radarr.unmonitor', { title: movie.title })}
-            aria-label={unmonitoring ? _t('radarr.unmonitoring', { title: movie.title }) : _t('radarr.unmonitor', { title: movie.title })}
-            disabled={unmonitoring}
-            onClick={() =>
-              run(
-                `unmonitor-radarr-${candidate.id}`,
-                () => api<Candidate>(`/api/candidates/${candidate.id}/unmonitor-radarr`, { method: 'POST' }),
-                () => _t('notice.unmonitored', { title: movie.title })
-              )
-            }
-          >
-            {unmonitoring ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Radar size={16} aria-hidden="true" />}
-            <span className="buttonText">{unmonitoring ? _t('radarr.unmonitoringButton') : _t('radarr.unmonitorButton')}</span>
-          </button>
+      <div className="mediaDetails">
+        <strong className="mediaTitle">{displayTitle}</strong>
+        {bylineParts.length > 0 && <span className="mediaByline">{bylineParts.join(' · ')}</span>}
+        <span className="mediaMeta">
+          <span>{movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}</span>
+          {tmdbMovieId && (
+            <>
+              <span aria-hidden="true"> · </span>
+              <TmdbMovieMetaLink tmdbMovieId={tmdbMovieId} />
+            </>
+          )}
+        </span>
+        {overview && <p className="mediaOverview">{overview}</p>}
+      </div>
+      {canRemoveFromRadarr && candidate && (
+        <div className="mediaActions monitoredActions">
           <button
             type="button"
             title={removing ? _t('radarr.removing', { title: movie.title }) : _t('radarr.remove', { title: movie.title })}
@@ -1528,14 +1662,18 @@ function MonitoredMovieRow({
 
 function CandidateCard({ candidate, busy, run, _t }: { candidate: Candidate; busy: string | null; run: RunFn; _t: Translator }) {
   const autoAdded = candidate.status === 'auto_added';
-  const canAddToRadarr = candidate.status === 'new' || candidate.status === 'ignored' || (candidate.status === 'approved' && candidate.radarrMovieId != null);
+  const canAddToRadarr =
+    candidate.status === 'new' ||
+    candidate.status === 'ignored' ||
+    candidate.status === 'rejected' ||
+    (candidate.status === 'approved' && candidate.radarrMovieId != null);
   const canIgnore = candidate.status === 'new';
   const actionable = canAddToRadarr || autoAdded || canIgnore;
   const acking = busy === `ack-${candidate.id}`;
   const approving = busy === `approve-${candidate.id}`;
   const ignoring = busy === `ignore-${candidate.id}`;
   const actionControls = actionable ? (
-    <div className="candidateActions">
+    <div className="mediaActions candidateActions">
       {autoAdded && (
         <button
           type="button"
@@ -1556,7 +1694,7 @@ function CandidateCard({ candidate, busy, run, _t }: { candidate: Candidate; bus
           }
         >
           {acking ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}
-          {acking ? _t('candidate.saving') : _t('candidate.ok')}
+          <span className="buttonText">{acking ? _t('candidate.saving') : _t('candidate.ok')}</span>
         </button>
       )}
       {canAddToRadarr && (
@@ -1575,7 +1713,7 @@ function CandidateCard({ candidate, busy, run, _t }: { candidate: Candidate; bus
           }
         >
           {approving ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-          {approving ? _t('candidate.addingToRadarrButton') : _t('candidate.addToRadarrButton')}
+          <span className="buttonText">{approving ? _t('candidate.addingToRadarrButton') : _t('candidate.addToRadarrButton')}</span>
         </button>
       )}
       {canIgnore && (
@@ -1594,34 +1732,33 @@ function CandidateCard({ candidate, busy, run, _t }: { candidate: Candidate; bus
           }
         >
           {ignoring ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}
-          {ignoring ? _t('candidate.ignoringButton') : _t('candidate.ignoreButton')}
+          <span className="buttonText">{ignoring ? _t('candidate.ignoringButton') : _t('candidate.ignoreButton')}</span>
         </button>
       )}
     </div>
   ) : null;
+  const displayTitle = titleWithoutComedianName(candidate.title, candidate.comedianName);
 
   return (
-    <article className="candidate">
-      <div className="poster">
+    <article className="mediaCard candidate">
+      <div className="mediaPoster">
         {candidate.posterPath ? (
           <img src={`${imageBase}${candidate.posterPath}`} alt={_t('candidate.posterAlt', { title: candidate.title })} />
         ) : (
           <Film size={30} aria-hidden="true" />
         )}
       </div>
-      <div className="candidateBody">
-        <div className="candidateTop">
-          <div>
-            <h3>
-              <TmdbMovieTitleLink tmdbMovieId={candidate.tmdbMovieId} title={candidate.title} />
-            </h3>
-            <p>{candidate.comedianName}{candidate.year ? ` · ${candidate.year}` : ''}</p>
-          </div>
-          <strong className={candidate.confidence >= 70 ? 'score high' : 'score'}>{candidate.confidence}</strong>
-        </div>
-        <p className="overview">{candidate.overview || _t('candidate.noOverview')}</p>
-        <p className="candidateStatus">{_t(`status.${candidate.status}`)}</p>
+      <div className="mediaDetails">
+        <strong className="mediaTitle">{displayTitle}</strong>
+        <span className="mediaByline">{candidate.comedianName}{candidate.year ? ` · ${candidate.year}` : ''}</span>
+        <span className="mediaMeta">
+          <span>{_t(`status.${candidate.status}`)}</span>
+          <span aria-hidden="true"> · </span>
+          <TmdbMovieMetaLink tmdbMovieId={candidate.tmdbMovieId} />
+        </span>
+        <p className="mediaOverview">{candidate.overview || _t('candidate.noOverview')}</p>
       </div>
+      <strong className={candidate.confidence >= 70 ? 'score high' : 'score'}>{candidate.confidence}</strong>
       {actionControls}
     </article>
   );
