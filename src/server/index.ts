@@ -17,11 +17,13 @@ import {
 } from './db';
 import { env } from './env';
 import { originFromPlaceOfBirth } from './origin';
+import { searchComedianPeople } from './personSearch';
 import { RadarrClient } from './radarr';
 import { scanAllComedians, scanComedian } from './scanner';
 import { startDailyScanScheduler } from './scheduler';
 import { TmdbClient } from './tmdb';
-import type { AppSettings, CandidateStatus, PersonSearchResult } from '../shared/types';
+import { applyUpdate, getUpdateStatus, refreshUpdateStatus } from './updater';
+import type { AppSettings, CandidateStatus } from '../shared/types';
 
 const app = express();
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,6 +43,28 @@ function asyncRoute(handler: express.RequestHandler): express.RequestHandler {
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true, name: 'Chucklarr' });
 });
+
+app.get('/api/update', (_request, response) => {
+  response.json(getUpdateStatus());
+});
+
+app.post(
+  '/api/update/check',
+  asyncRoute(async (_request, response) => {
+    response.json(await refreshUpdateStatus());
+  })
+);
+
+app.post(
+  '/api/update/apply',
+  asyncRoute(async (_request, response) => {
+    const status = await applyUpdate();
+    response.json(status);
+    response.once('finish', () => {
+      setTimeout(() => process.exit(0), 500);
+    });
+  })
+);
 
 app.get('/api/settings', (_request, response) => {
   response.json(getSettings());
@@ -109,46 +133,9 @@ app.get(
       return;
     }
 
-    const people = prioritiseComedianSearchResults(await tmdb.searchPeople(query));
-    const results = await Promise.all(
-      people.slice(0, 8).map<Promise<PersonSearchResult>>(async (person) => {
-        const details = await tmdb.personDetails(person.id).catch(() => null);
-        const origin = originFromPlaceOfBirth(details?.place_of_birth ?? null);
-        return {
-          tmdbPersonId: person.id,
-          name: details?.name ?? person.name,
-          profilePath: details?.profile_path ?? person.profile_path,
-          knownForDepartment: person.known_for_department ?? null,
-          placeOfBirth: details?.place_of_birth ?? null,
-          countryCode: origin.countryCode,
-          countryName: origin.countryName,
-          knownFor: (person.known_for ?? [])
-            .map((knownFor) => knownFor.title ?? knownFor.name ?? '')
-            .filter(Boolean)
-            .slice(0, 3)
-        };
-      })
-    );
-    response.json(results);
+    response.json(await searchComedianPeople(tmdb, query));
   })
 );
-
-function prioritiseComedianSearchResults<T extends { known_for_department?: string }>(people: T[]): T[] {
-  // Comedians are normally stored as actors in TMDB. Keep TMDB's relevance order
-  // inside each group, but show acting results before directing/writing/crew
-  // matches that happen to share the same name.
-  return people
-    .map((person, index) => ({ person, index }))
-    .sort((first, second) => {
-      const firstIsActing = first.person.known_for_department === 'Acting';
-      const secondIsActing = second.person.known_for_department === 'Acting';
-      if (firstIsActing !== secondIsActing) {
-        return firstIsActing ? -1 : 1;
-      }
-      return first.index - second.index;
-    })
-    .map(({ person }) => person);
-}
 
 app.post(
   '/api/comedians',
@@ -325,5 +312,8 @@ app.use((error: Error, _request: express.Request, response: express.Response, _n
 
 app.listen(env.port, () => {
   console.log(`Chucklarr listening on http://localhost:${env.port}`);
+  void refreshUpdateStatus().catch((caught) => {
+    console.warn(caught instanceof Error ? `Update check skipped: ${caught.message}` : 'Update check skipped.');
+  });
   startDailyScanScheduler();
 });
