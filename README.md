@@ -1,3 +1,6 @@
+Latest release version: `v0.1.1`  
+Latest release date: `2026-05-19`
+
 # Chucklarr
 
 Chucklarr is a stand-up comedy companion for Radarr.
@@ -12,7 +15,7 @@ Movie databases are not especially tidy about stand-up. Specials can be listed a
 - Automatically scan when a comedian is added.
 - Scan individual comedians manually, with daily automatic rescans in the background.
 - Score likely stand-up specials using title, credit, genre, keyword, runtime, and Radarr-match signals.
-- Split each comedian into `To review`, `Monitored`, and `Not monitored`.
+- Split each comedian into `To review`, `Wanted`, and `Not wanted`.
 - Show whether Radarr already has a candidate.
 - Add candidates to Radarr.
 - Unmonitor or remove Radarr items when they have not been downloaded yet.
@@ -180,7 +183,7 @@ Auto-add above: 95
 Auto-ignore below: 60
 ```
 
-Auto-added items are still shown once so you can see what happened. Ignored items stay in `Not monitored`, and rescans preserve manual ignored/rejected decisions.
+Auto-added items are still shown once so you can see what happened. Ignored items stay in `Not wanted`, and rescans preserve manual ignored/rejected decisions.
 
 ## Daily Automatic Scans
 
@@ -244,6 +247,19 @@ That directory is mounted into the container by `docker-compose.yml`, so it surv
 - Added Chucklarr app icons and web manifest metadata so mobile home-screen shortcuts use the face mark instead of a generated letter tile.
 - Refined the comedian detail experience with shared card layouts for monitored and unmonitored specials, poster thumbnails, clearer available/monitored grouping, compact mobile tabs, 44px touch targets, and tighter responsive metadata.
 - Fixed removed Radarr candidates so rejected items can be added back to Radarr from the review list.
+- Renamed the detail tabs to `Wanted` and `Not wanted`, grouped review and not-wanted results by status, and kept all result tabs in a single-column card layout.
+- Replaced the ignore action checkmark with an eye-off icon so it no longer looks like an approval action.
+- Added README release metadata and made release version, release date, and changelog updates mandatory for every pull request.
+
+## Pull Request Release Rule
+
+Every pull request must update all of the following in this README:
+
+- `Latest release version`
+- `Latest release date`
+- `Changelog`
+
+Do not open a pull request without those README updates, even for small fixes.
 
 ## Local Development
 

@@ -698,6 +698,7 @@ label {
   text-transform: uppercase;
 }
 
+.mediaGroups,
 .monitoredGroups {
   display: grid;
   gap: 14px;
@@ -881,7 +882,7 @@ label {
 .candidateGrid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .detailPanel {
@@ -898,7 +899,7 @@ label {
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 6px;
-  margin: -4px 0 16px;
+  margin: 14px 0 -2px;
 }
 
 .tab {
@@ -1234,9 +1235,6 @@ label {
     grid-template-columns: 360px minmax(0, 1fr);
   }
 
-  .candidateGrid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @media (min-width: 1200px) and (max-width: 1439px) {
@@ -1244,9 +1242,6 @@ label {
     grid-template-columns: 390px minmax(0, 1fr);
   }
 
-  .candidateGrid {
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  }
 }
 
 @media (min-width: 1440px) {
@@ -1258,9 +1253,6 @@ label {
     grid-template-columns: 440px minmax(0, 1fr);
   }
 
-  .candidateGrid {
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  }
 }
 
 @media (max-width: 920px) {

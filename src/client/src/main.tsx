@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   Download,
   Eye,
+  EyeOff,
   ExternalLink,
   Film,
   Play,
@@ -191,10 +192,28 @@ function App() {
     () => notMonitoredCandidates.filter((candidate) => candidate.status === 'new'),
     [notMonitoredCandidates]
   );
+  const reviewCandidateGroups = useMemo(
+    () => (reviewCandidates.length > 0 ? [{ status: 'new' as const, candidates: reviewCandidates }] : []),
+    [reviewCandidates]
+  );
   const ignoredNotMonitoredCandidates = useMemo(
     () => notMonitoredCandidates.filter((candidate) => candidate.status !== 'new'),
     [notMonitoredCandidates]
   );
+  const notWantedCandidateGroups = useMemo(() => {
+    const statusOrder: Candidate['status'][] = ['ignored', 'rejected', 'approved', 'auto_added'];
+    const groups = new Map<Candidate['status'], Candidate[]>();
+
+    for (const candidate of ignoredNotMonitoredCandidates) {
+      const group = groups.get(candidate.status) ?? [];
+      group.push(candidate);
+      groups.set(candidate.status, group);
+    }
+
+    return statusOrder
+      .filter((status) => groups.has(status))
+      .map((status) => ({ status, candidates: groups.get(status) ?? [] }));
+  }, [ignoredNotMonitoredCandidates]);
   const comedianResultCounts = useMemo(() => {
     type ResultState = 'none' | 'monitored' | 'available';
     const stateRank: Record<ResultState, number> = {
@@ -1383,16 +1402,16 @@ function App() {
             </div>
             <div className="desktopTabPanels">
               {activeDetailTab === 'review' && (
-                <div className="candidateGrid">
-                  {reviewCandidates.map((candidate) => (
-                    <CandidateCard key={candidate.id} candidate={candidate} busy={busy} run={run} _t={_t} />
-                  ))}
+                <>
+                  {reviewCandidates.length > 0 && (
+                    <CandidateStatusGroups groups={reviewCandidateGroups} busy={busy} run={run} _t={_t} />
+                  )}
                   {reviewCandidates.length === 0 && !selectedComedianScanning && (
                     <p className="empty">
                       {selectedComedian ? _t('empty.noReview') : _t('empty.chooseReview')}
                     </p>
                   )}
-                </div>
+                </>
               )}
               {activeDetailTab === 'monitored' && (
                 <>
@@ -1414,16 +1433,16 @@ function App() {
                 </>
               )}
               {activeDetailTab === 'notMonitored' && (
-                <div className="candidateGrid">
-                  {ignoredNotMonitoredCandidates.map((candidate) => (
-                    <CandidateCard key={candidate.id} candidate={candidate} busy={busy} run={run} _t={_t} />
-                  ))}
+                <>
+                  {ignoredNotMonitoredCandidates.length > 0 && (
+                    <CandidateStatusGroups groups={notWantedCandidateGroups} busy={busy} run={run} _t={_t} />
+                  )}
                   {ignoredNotMonitoredCandidates.length === 0 && !selectedComedianScanning && (
                     <p className="empty">
                       {selectedComedian ? _t('empty.noNotMonitored') : _t('empty.chooseNotMonitored')}
                     </p>
                   )}
-                </div>
+                </>
               )}
             </div>
             <div className="detailSections">
@@ -1433,11 +1452,7 @@ function App() {
                     <h3>{_t('tabs.review')}</h3>
                     <span className="sectionCount">{reviewCandidates.length}</span>
                   </div>
-                  <div className="candidateGrid">
-                    {reviewCandidates.map((candidate) => (
-                      <CandidateCard key={candidate.id} candidate={candidate} busy={busy} run={run} _t={_t} />
-                    ))}
-                  </div>
+                  <CandidateStatusGroups groups={reviewCandidateGroups} busy={busy} run={run} _t={_t} />
                 </section>
               )}
 
@@ -1471,16 +1486,14 @@ function App() {
                     <h3>{_t('tabs.notMonitored')}</h3>
                     <span className="sectionCount">{ignoredNotMonitoredCandidates.length}</span>
                   </div>
-                  <div className="candidateGrid">
-                    {ignoredNotMonitoredCandidates.map((candidate) => (
-                      <CandidateCard key={candidate.id} candidate={candidate} busy={busy} run={run} _t={_t} />
-                    ))}
+                  {ignoredNotMonitoredCandidates.length > 0 && (
+                    <CandidateStatusGroups groups={notWantedCandidateGroups} busy={busy} run={run} _t={_t} />
+                  )}
                     {ignoredNotMonitoredCandidates.length === 0 && !selectedComedianScanning && (
                       <p className="empty">
                         {selectedComedian ? _t('empty.noNotMonitored') : _t('empty.chooseNotMonitored')}
                       </p>
                     )}
-                  </div>
                 </section>
               )}
             </div>
@@ -1581,6 +1594,40 @@ function MonitoredRowsList({
           <div className="monitoredList">{renderRows(monitoredRows)}</div>
         </section>
       )}
+    </div>
+  );
+}
+
+type CandidateStatusGroup = {
+  status: Candidate['status'];
+  candidates: Candidate[];
+};
+
+function CandidateStatusGroups({
+  groups,
+  busy,
+  run,
+  _t
+}: {
+  groups: CandidateStatusGroup[];
+  busy: string | null;
+  run: RunFn;
+  _t: Translator;
+}) {
+  return (
+    <div className="mediaGroups">
+      {groups.map((group) => (
+        <section className="mediaGroup" key={group.status}>
+          <div className="mediaGroupTitle">
+            <span>{_t('sections.statusWithCount', { status: _t(`status.${group.status}`), count: group.candidates.length })}</span>
+          </div>
+          <div className="candidateGrid">
+            {group.candidates.map((candidate) => (
+              <CandidateCard key={candidate.id} candidate={candidate} busy={busy} run={run} _t={_t} />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -1731,7 +1778,7 @@ function CandidateCard({ candidate, busy, run, _t }: { candidate: Candidate; bus
             )
           }
         >
-          {ignoring ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}
+          {ignoring ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <EyeOff size={16} aria-hidden="true" />}
           <span className="buttonText">{ignoring ? _t('candidate.ignoringButton') : _t('candidate.ignoreButton')}</span>
         </button>
       )}
