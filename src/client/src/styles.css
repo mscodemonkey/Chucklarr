@@ -268,6 +268,58 @@ h3 {
   padding: 0 5px;
 }
 
+.updateBanner {
+  align-items: center;
+  backdrop-filter: blur(18px) saturate(140%);
+  background: color-mix(in srgb, var(--warning-bg) 70%, var(--glass-strong));
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 34px var(--shadow);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+}
+
+.updateBanner strong,
+.updateBanner span {
+  display: block;
+}
+
+.updateBanner strong {
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.updateBanner span {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+.updateActions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.updateActions a,
+.updateActions button {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.updateActions a {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .workspace {
   align-items: start;
   gap: 18px;
@@ -616,6 +668,22 @@ label {
   display: inline-block;
   font-size: 15px;
   margin-top: 0;
+}
+
+.personMatchTitle .comedianSignal {
+  background: color-mix(in srgb, var(--success-bg) 76%, transparent);
+  border: 1px solid var(--success-border);
+  border-radius: 999px;
+  color: var(--primary-strong);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  margin-top: 0;
+  max-width: 120px;
+  padding: 4px 7px;
+  text-transform: uppercase;
 }
 
 .listDivider {
@@ -1027,6 +1095,7 @@ label {
 .candidateBody {
   display: grid;
   gap: 8px;
+  min-width: 0;
   padding: 0 0 0 10px;
 }
 
@@ -1035,17 +1104,28 @@ label {
   display: flex;
   gap: 8px;
   justify-content: space-between;
+  min-width: 0;
+}
+
+.candidateTop > div {
+  min-width: 0;
 }
 
 .candidateTop h3 {
   font-size: 16px;
   line-height: 1.12;
+  min-width: 0;
 }
 
 .candidateTop p {
   color: var(--text-muted);
+  display: block;
   font-size: 13px;
   margin-top: 3px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .score {
@@ -1205,6 +1285,15 @@ label {
 
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  .updateBanner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .updateActions {
+    flex-wrap: wrap;
   }
 
   .libraryWorkspace .mainColumn {

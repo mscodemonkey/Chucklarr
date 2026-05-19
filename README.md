@@ -216,7 +216,9 @@ Keep backup files private. They are intended for moving machines or recovering a
 
 ## Updating
 
-Pull the latest code and rebuild:
+Docker builds check GitHub for newer Chucklarr commits when the app starts. If a newer build is available, Chucklarr shows an update banner with a link to the commit and, for Docker images that allow it, an `Update now` button. The button downloads the configured GitHub branch, rebuilds the app inside the container, installs the new build, and restarts Chucklarr.
+
+You can still update manually by pulling the latest code and rebuilding:
 
 ```bash
 git pull
@@ -230,6 +232,15 @@ Your data lives in:
 ```
 
 That directory is mounted into the container by `docker-compose.yml`, so it survives container rebuilds.
+
+## Changelog
+
+### 2026-05-19
+
+- Improved comedian search ranking for common names by combining TMDB person search with stand-up-like movie title matches and credited cast/crew evidence. This surfaces the correct Paul Smith record through `Paul Smith: Pablo Live` instead of relying only on noisy person-search results.
+- Added a `Likely comedian` badge for search results that have comedian-specific evidence.
+- Added Docker startup update checks against GitHub, plus an in-app update banner and explicit `Update now` action for eligible Docker builds.
+- Fixed candidate card layout so long titles and metadata truncate inside the card instead of pushing the confidence score out of bounds.
 
 ## Local Development
 
@@ -299,6 +310,10 @@ Most settings can be changed in the UI. Environment variables are useful for fir
 | `CHUCKLARR_THEME` | `system` | `system`, `light`, or `dark`. |
 | `CHUCKLARR_METADATA_SOURCE` | `service` | Use `service` or `tmdb`. |
 | `CHUCKLARR_METADATA_SERVICE_URL` | See `.env.example` | Hosted metadata proxy URL. |
+| `CHUCKLARR_UPDATE_REPOSITORY` | `mscodemonkey/Chucklarr` | GitHub repository checked for Docker update banners. |
+| `CHUCKLARR_UPDATE_BRANCH` | `main` | GitHub branch checked for Docker update banners. |
+| `CHUCKLARR_ALLOW_AUTO_UPDATE` | `true` in Docker | Enables the in-app Docker update button. |
+| `CHUCKLARR_BUILD_REF` | Docker build ref | Commit SHA used to compare the running build with GitHub. Docker normally writes this automatically. |
 | `TMDB_BEARER_TOKEN` | empty | Only needed when metadata source is `tmdb`. |
 | `RADARR_URL` | `http://localhost:7878` | Base Radarr URL. |
 | `RADARR_API_KEY` | empty | Radarr API key. |

@@ -2,7 +2,11 @@ import type { AppSettings } from '../shared/types';
 
 export const env = {
   port: Number(process.env.PORT ?? 3333),
-  databasePath: process.env.DATABASE_PATH ?? './data/chucklarr.db'
+  databasePath: process.env.DATABASE_PATH ?? './data/chucklarr.db',
+  updateRepository: process.env.CHUCKLARR_UPDATE_REPOSITORY ?? 'mscodemonkey/Chucklarr',
+  updateBranch: process.env.CHUCKLARR_UPDATE_BRANCH ?? 'main',
+  updateBuildRef: process.env.CHUCKLARR_BUILD_REF ?? '',
+  allowAutoUpdate: process.env.CHUCKLARR_ALLOW_AUTO_UPDATE === 'true'
 };
 
 export function settingsFromEnv(): Partial<AppSettings> {

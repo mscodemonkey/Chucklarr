@@ -55,6 +55,7 @@ export type PersonSearchResult = {
   countryCode: string | null;
   countryName: string | null;
   knownFor: string[];
+  matchReasons?: string[];
 };
 
 export type Comedian = {
@@ -108,6 +109,22 @@ export type RestoreSummary = {
   settings: number;
   comedians: number;
   candidates: number;
+};
+
+export type UpdateStatus = {
+  enabled: boolean;
+  checking: boolean;
+  updating: boolean;
+  updateAvailable: boolean;
+  canAutoUpdate: boolean;
+  repository: string;
+  branch: string;
+  currentSha: string | null;
+  latestSha: string | null;
+  latestUrl: string | null;
+  checkedAt: string | null;
+  message: string | null;
+  error: string | null;
 };
 
 export type ApiError = {

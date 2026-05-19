@@ -26,7 +26,8 @@ import type {
   RadarrMonitoredMovie,
   RadarrOptions,
   RestoreSummary,
-  ScanResult
+  ScanResult,
+  UpdateStatus
 } from '../../shared/types';
 import { createTranslator, normaliseLanguage, supportedLanguages } from './i18n';
 import './styles.css';
@@ -133,6 +134,7 @@ function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [radarrOptions, setRadarrOptions] = useState<RadarrOptions>(emptyRadarrOptions);
   const [radarrChecking, setRadarrChecking] = useState(false);
   const [radarrChecked, setRadarrChecked] = useState(false);
@@ -338,6 +340,16 @@ function App() {
 
     loadInitialData();
   }, []);
+
+  useEffect(() => {
+    if (!initialDataLoaded) {
+      return;
+    }
+
+    api<UpdateStatus>('/api/update/check', { method: 'POST' })
+      .then(setUpdateStatus)
+      .catch(() => undefined);
+  }, [initialDataLoaded]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -593,6 +605,21 @@ function App() {
     }
   }
 
+  async function installUpdate() {
+    setBusy('app-update');
+    setError(null);
+    setNotice(null);
+    try {
+      const status = await api<UpdateStatus>('/api/update/apply', { method: 'POST' });
+      setUpdateStatus(status);
+      setNotice(_t('notice.updateRestarting'));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : _t('error.generic'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -627,6 +654,42 @@ function App() {
             <X size={16} aria-hidden="true" />
           </button>
         </div>
+      )}
+
+      {updateStatus?.updateAvailable && (
+        <section className="updateBanner" role="status" aria-live="polite">
+          <div>
+            <strong>{_t('update.available')}</strong>
+            <span>
+              {_t('update.details', {
+                current: updateStatus.currentSha?.slice(0, 7) ?? _t('update.unknownVersion'),
+                latest: updateStatus.latestSha?.slice(0, 7) ?? _t('update.unknownVersion')
+              })}
+            </span>
+          </div>
+          <div className="updateActions">
+            {updateStatus.latestUrl && (
+              <a href={updateStatus.latestUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={16} aria-hidden="true" />
+                {_t('update.view')}
+              </a>
+            )}
+            <button
+              type="button"
+              className="primary"
+              disabled={!updateStatus.canAutoUpdate || busy === 'app-update' || updateStatus.updating}
+              title={!updateStatus.canAutoUpdate ? _t('update.disabled') : _t('update.install')}
+              onClick={installUpdate}
+            >
+              {busy === 'app-update' || updateStatus.updating ? (
+                <RefreshCcw className="spin" size={16} aria-hidden="true" />
+              ) : (
+                <Download size={16} aria-hidden="true" />
+              )}
+              {_t(busy === 'app-update' || updateStatus.updating ? 'update.installing' : 'update.install')}
+            </button>
+          </div>
+        </section>
       )}
 
       <section className={showingSettings ? 'workspace settingsWorkspace' : 'workspace libraryWorkspace'}>
@@ -998,6 +1061,11 @@ function App() {
                           <div>
                             <div className="personMatchTitle">
                               <strong>{match.name}</strong>
+                              {match.matchReasons && match.matchReasons.length > 0 && (
+                                <span className="comedianSignal" title={match.matchReasons.join(', ')}>
+                                  {_t('comedians.likelyComedian')}
+                                </span>
+                              )}
                               {flag && (
                                 <span
                                   className="originFlag"
