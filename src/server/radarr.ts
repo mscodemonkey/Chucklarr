@@ -29,6 +29,24 @@ type RadarrRootFolderResponse = {
   accessible?: boolean;
 };
 
+type RadarrValidationFailure = {
+  propertyName?: string;
+  errorMessage?: string;
+  attemptedValue?: unknown;
+  errorCode?: string;
+};
+
+class RadarrRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: string,
+    readonly validationFailures: RadarrValidationFailure[]
+  ) {
+    super(message);
+  }
+}
+
 export class RadarrClient {
   constructor(private readonly settings: AppSettings) {}
 
@@ -91,25 +109,44 @@ export class RadarrClient {
       throw new Error('Radarr URL, API key, quality profile, and root folder must be configured.');
     }
 
-    const response = await this.request('/api/v3/movie', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        title: candidate.title,
-        tmdbId: candidate.tmdbMovieId,
-        qualityProfileId: Number(this.settings.radarrQualityProfileId),
-        rootFolderPath: this.settings.radarrRootFolderPath,
-        monitored: true,
-        minimumAvailability: this.settings.radarrMinimumAvailability || 'released',
-        addOptions: {
-          searchForMovie: true
-        }
-      })
-    });
+    const existingMovie = (await this.existingMoviesByTmdbId()).get(candidate.tmdbMovieId);
+    if (existingMovie?.id) {
+      return this.setMovieMonitored(existingMovie.id, true);
+    }
 
-    return response.json() as Promise<RadarrMovie>;
+    try {
+      const response = await this.request('/api/v3/movie', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: candidate.title,
+          tmdbId: candidate.tmdbMovieId,
+          qualityProfileId: Number(this.settings.radarrQualityProfileId),
+          rootFolderPath: this.settings.radarrRootFolderPath,
+          monitored: true,
+          minimumAvailability: this.settings.radarrMinimumAvailability || 'released',
+          addOptions: {
+            searchForMovie: true
+          }
+        })
+      });
+
+      return response.json() as Promise<RadarrMovie>;
+    } catch (caught) {
+      const duplicatePath = caught instanceof RadarrRequestError ? duplicateMoviePath(caught.validationFailures) : null;
+      if (!duplicatePath) {
+        throw caught;
+      }
+
+      const movie = await this.existingMovieByPath(duplicatePath);
+      if (movie?.id) {
+        return this.setMovieMonitored(movie.id, true);
+      }
+
+      throw new Error(`Radarr already has a movie configured at ${duplicatePath}, but Chucklarr could not find it in Radarr's movie list.`);
+    }
   }
 
   async setMovieMonitored(movieId: number, monitored: boolean): Promise<RadarrMovie> {
@@ -147,14 +184,32 @@ export class RadarrClient {
     );
   }
 
+  async existingMovieByPath(path: string): Promise<RadarrMovie | null> {
+    if (!this.connectionConfigured) {
+      return null;
+    }
+
+    const normalisedPath = normaliseRadarrPath(path);
+    const movies = await this.get<RadarrMovie[]>('/api/v3/movie');
+    return movies.find((movie) => normaliseRadarrPath(movie.path) === normalisedPath) ?? null;
+  }
+
   async monitoredMovies(): Promise<RadarrMonitoredMovie[]> {
+    if (!this.connectionConfigured) {
+      return [];
+    }
+
+    return (await this.movies()).filter((movie) => movie.monitored);
+  }
+
+  async movies(): Promise<RadarrMonitoredMovie[]> {
     if (!this.connectionConfigured) {
       return [];
     }
 
     const movies = await this.get<RadarrMovie[]>('/api/v3/movie');
     return movies
-      .filter((movie) => movie.id && movie.monitored)
+      .filter((movie) => movie.id)
       .map((movie) => ({
         id: movie.id as number,
         tmdbId: movie.tmdbId ?? null,
@@ -195,9 +250,39 @@ export class RadarrClient {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Radarr request failed (${response.status}): ${text.slice(0, 300)}`);
+      const message = `Radarr request failed (${response.status}): ${text.slice(0, 300)}`;
+      throw new RadarrRequestError(message, response.status, text, parseRadarrValidationFailures(text));
     }
 
     return response;
   }
+}
+
+function parseRadarrValidationFailures(text: string): RadarrValidationFailure[] {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((failure): failure is RadarrValidationFailure => typeof failure === 'object' && failure !== null);
+  } catch {
+    return [];
+  }
+}
+
+function duplicateMoviePath(failures: RadarrValidationFailure[]): string | null {
+  const pathFailure = failures.find(
+    (failure) =>
+      failure.propertyName?.toLowerCase() === 'path' &&
+      failure.errorCode === 'MoviePathValidator' &&
+      typeof failure.attemptedValue === 'string'
+  );
+
+  const attemptedValue = pathFailure?.attemptedValue;
+  return typeof attemptedValue === 'string' ? attemptedValue.trim() || null : null;
+}
+
+function normaliseRadarrPath(path: string | undefined): string {
+  return (path ?? '').trim().replace(/[\\/]+$/, '').toLowerCase();
 }

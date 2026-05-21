@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { AppSettings, BackupData, Candidate, CandidateStatus, Comedian, RestoreSummary } from '../shared/types';
+import type { AppSettings, BackupData, Candidate, CandidateStatus, Comedian, RadarrMonitoredMovie, RestoreSummary } from '../shared/types';
 import { env, settingsFromEnv } from './env';
 
 // The server process owns one SQLite connection for its lifetime. Tests set
@@ -348,6 +348,39 @@ export function updateCandidateStatus(id: number, status: CandidateStatus, radar
     WHERE id = ?
   `).run(status, radarrMovieId ?? null, id);
   return getCandidate(id);
+}
+
+export function syncCandidatesWithRadarr(movies: RadarrMonitoredMovie[]): Candidate[] {
+  const candidates = listCandidates();
+  const movieById = new Map(movies.map((movie) => [movie.id, movie]));
+  const movieByTmdbId = new Map(movies.filter((movie) => movie.tmdbId != null).map((movie) => [movie.tmdbId as number, movie]));
+  const syncCandidate = db.prepare(`
+    UPDATE candidates
+    SET status = ?, radarr_movie_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
+  const changedIds: number[] = [];
+
+  for (const candidate of candidates) {
+    const radarrMovie = movieByTmdbId.get(candidate.tmdbMovieId) ?? (candidate.radarrMovieId == null ? null : movieById.get(candidate.radarrMovieId));
+
+    if (radarrMovie) {
+      const nextStatus: CandidateStatus = radarrMovie.monitored ? 'approved' : 'ignored';
+      if (candidate.status !== nextStatus || candidate.radarrMovieId !== radarrMovie.id) {
+        syncCandidate.run(nextStatus, radarrMovie.id, candidate.id);
+        changedIds.push(candidate.id);
+      }
+      continue;
+    }
+
+    if (candidate.radarrMovieId != null && !movieById.has(candidate.radarrMovieId)) {
+      const nextStatus: CandidateStatus = candidate.status === 'approved' || candidate.status === 'auto_added' ? 'rejected' : candidate.status;
+      syncCandidate.run(nextStatus, null, candidate.id);
+      changedIds.push(candidate.id);
+    }
+  }
+
+  return changedIds.map((id) => getCandidate(id)).filter((candidate): candidate is Candidate => Boolean(candidate));
 }
 
 export function markCandidateRemovedFromRadarr(id: number): Candidate | null {

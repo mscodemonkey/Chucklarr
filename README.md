@@ -1,5 +1,5 @@
-Latest release version: `v0.1.1`  
-Latest release date: `2026-05-19`
+Latest release version: `v0.1.2`  
+Latest release date: `2026-05-21`
 
 # Chucklarr
 
@@ -238,6 +238,13 @@ That directory is mounted into the container by `docker-compose.yml`, so it surv
 
 ## Changelog
 
+### 2026-05-21
+
+- Added Radarr status sync so movies added, unmonitored, or removed in Radarr or external tools are reflected in Chucklarr without a full rescan.
+- Added a quiet 60-second foreground Radarr sync while the app is open, plus sync on normal app data loads.
+- Fixed Radarr duplicate-path add failures by matching existing movies by TMDB ID or Radarr's duplicate path validation and monitoring the existing movie.
+- Added an automated release metadata test so package versions, README release metadata, and changelog entries cannot drift silently.
+
 ### 2026-05-19
 
 - Improved comedian search ranking for common names by combining TMDB person search with stand-up-like movie title matches and credited cast/crew evidence. This surfaces the correct Paul Smith record through `Paul Smith: Pablo Live` instead of relying only on noisy person-search results.
@@ -260,6 +267,7 @@ Every pull request must update all of the following in this README:
 - `Changelog`
 
 Do not open a pull request without those README updates, even for small fixes.
+`npm test` enforces that README release metadata, the changelog date, `package.json`, and `package-lock.json` stay in sync.
 
 ## Local Development
 
