@@ -11,6 +11,7 @@ import {
   listComedians,
   markCandidateRemovedFromRadarr,
   restoreBackup,
+  syncCandidatesWithRadarr,
   updateComedianOrigin,
   updateCandidateStatus,
   updateSettings
@@ -108,6 +109,23 @@ app.get(
   '/api/radarr/movies',
   asyncRoute(async (_request, response) => {
     response.json(await new RadarrClient(getSettings()).monitoredMovies());
+  })
+);
+
+app.post(
+  '/api/radarr/sync',
+  asyncRoute(async (_request, response) => {
+    const radarr = new RadarrClient(getSettings());
+    if (!radarr.connectionConfigured) {
+      response.json({ movies: [], updatedCandidates: [] });
+      return;
+    }
+
+    const movies = await radarr.movies();
+    response.json({
+      movies: movies.filter((movie) => movie.monitored),
+      updatedCandidates: syncCandidatesWithRadarr(movies)
+    });
   })
 );
 

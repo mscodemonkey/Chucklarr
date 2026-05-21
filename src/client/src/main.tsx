@@ -34,6 +34,7 @@ import { createTranslator, normaliseLanguage, supportedLanguages } from './i18n'
 import './styles.css';
 
 const imageBase = 'https://image.tmdb.org/t/p/w342';
+const radarrSyncIntervalMs = 60_000;
 const emptyRadarrOptions: RadarrOptions = {
   connected: false,
   qualityProfiles: [],
@@ -41,6 +42,10 @@ const emptyRadarrOptions: RadarrOptions = {
 };
 type DetailTab = 'review' | 'monitored' | 'notMonitored';
 type Translator = ReturnType<typeof createTranslator>;
+type RadarrSyncResult = {
+  movies: RadarrMonitoredMovie[];
+  updatedCandidates: Candidate[];
+};
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -153,6 +158,7 @@ function App() {
   const [radarrChecked, setRadarrChecked] = useState(false);
   const addingPersonIdRef = useRef<number | null>(null);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
+  const radarrSyncingRef = useRef(false);
   const _t = useMemo(() => createTranslator(settings.language), [settings.language]);
   const theme = settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system';
 
@@ -342,17 +348,32 @@ function App() {
   }
   const showingSettings = initialDataLoaded && (showSettingsPage || !setupComplete);
 
+  async function syncRadarrState() {
+    if (radarrSyncingRef.current) {
+      return;
+    }
+
+    radarrSyncingRef.current = true;
+    try {
+      const [nextRadarrSync, nextCandidates] = await Promise.all([
+        api<RadarrSyncResult>('/api/radarr/sync', { method: 'POST' }).catch(() => ({ movies: [], updatedCandidates: [] })),
+        api<Candidate[]>('/api/candidates')
+      ]);
+      setCandidates(nextCandidates);
+      setMonitoredMovies(nextRadarrSync.movies);
+    } finally {
+      radarrSyncingRef.current = false;
+    }
+  }
+
   async function load(): Promise<AppSettings> {
-    const [nextSettings, nextComedians, nextCandidates, nextMonitoredMovies] = await Promise.all([
+    const [nextSettings, nextComedians] = await Promise.all([
       api<AppSettings>('/api/settings'),
-      api<Comedian[]>('/api/comedians'),
-      api<Candidate[]>('/api/candidates'),
-      api<RadarrMonitoredMovie[]>('/api/radarr/movies').catch(() => [])
+      api<Comedian[]>('/api/comedians')
     ]);
     setSettings(nextSettings);
     setComedians(nextComedians);
-    setCandidates(nextCandidates);
-    setMonitoredMovies(nextMonitoredMovies);
+    await syncRadarrState();
     return nextSettings;
   }
 
@@ -396,6 +417,18 @@ function App() {
     api<UpdateStatus>('/api/update/check', { method: 'POST' })
       .then(setUpdateStatus)
       .catch(() => undefined);
+  }, [initialDataLoaded]);
+
+  useEffect(() => {
+    if (!initialDataLoaded) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void syncRadarrState();
+    }, radarrSyncIntervalMs);
+
+    return () => window.clearInterval(intervalId);
   }, [initialDataLoaded]);
 
   useEffect(() => {
