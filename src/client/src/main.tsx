@@ -1,3 +1,9 @@
+/**
+ * Renders the Chucklarr browser application. The App component owns transient
+ * interface state, while the server remains responsible for persisted settings,
+ * comedians, candidates, and Radarr interactions.
+ */
+
 import React, { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -31,6 +37,7 @@ import type {
   UpdateStatus
 } from '../../shared/types';
 import { createTranslator, normaliseLanguage, supportedLanguages } from './i18n';
+import { isSetupComplete, shouldShowSettings } from './setup';
 import './styles.css';
 
 const imageBase = 'https://image.tmdb.org/t/p/w342';
@@ -148,6 +155,7 @@ function App() {
   const [selectedComedianId, setSelectedComedianId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [showSettingsPage, setShowSettingsPage] = useState(false);
+  const [persistedSettings, setPersistedSettings] = useState<AppSettings | null>(null);
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -325,28 +333,8 @@ function App() {
       : activeTab === 'monitored' && !hasReviewCandidates && !hasMonitoredRows && hasNotMonitoredCandidates
         ? 'notMonitored'
         : activeTab;
-  const metadataConfigured =
-    settings.metadataSource === 'tmdb' ? settings.tmdbBearerToken.trim() : settings.metadataServiceUrl.trim();
-  const setupComplete = Boolean(
-    metadataConfigured &&
-      settings.radarrUrl.trim() &&
-      settings.radarrApiKey.trim() &&
-      settings.radarrQualityProfileId.trim() &&
-      settings.radarrRootFolderPath.trim()
-  );
-
-  function setupCompleteFor(nextSettings: AppSettings) {
-    const nextMetadataConfigured =
-      nextSettings.metadataSource === 'tmdb' ? nextSettings.tmdbBearerToken.trim() : nextSettings.metadataServiceUrl.trim();
-    return Boolean(
-      nextMetadataConfigured &&
-        nextSettings.radarrUrl.trim() &&
-        nextSettings.radarrApiKey.trim() &&
-        nextSettings.radarrQualityProfileId.trim() &&
-        nextSettings.radarrRootFolderPath.trim()
-    );
-  }
-  const showingSettings = initialDataLoaded && (showSettingsPage || !setupComplete);
+  const persistedSetupComplete = persistedSettings ? isSetupComplete(persistedSettings) : false;
+  const showingSettings = shouldShowSettings(initialDataLoaded, showSettingsPage, persistedSettings);
 
   async function syncRadarrState() {
     if (radarrSyncingRef.current) {
@@ -372,6 +360,7 @@ function App() {
       api<Comedian[]>('/api/comedians')
     ]);
     setSettings(nextSettings);
+    setPersistedSettings(nextSettings);
     setComedians(nextComedians);
     await syncRadarrState();
     return nextSettings;
@@ -477,11 +466,12 @@ function App() {
         body: JSON.stringify(nextSettings)
       });
       setSettings(savedSettings);
+      setPersistedSettings(savedSettings);
       if (options.notify !== false) {
         setNotice(_t('notice.settingsSaved'));
       }
 
-      if (options.closeWhenSetupComplete !== false && setupCompleteFor(savedSettings)) {
+      if (options.closeWhenSetupComplete !== false && isSetupComplete(savedSettings)) {
         setShowSettingsPage(false);
       }
     } catch (caught) {
@@ -713,7 +703,7 @@ function App() {
         </div>
         <div className="topbarActions">
           {!initialDataLoaded ? null : showingSettings ? (
-            setupComplete && (
+            persistedSetupComplete && (
               <button type="button" aria-label={_t('nav.openLibrary')} title={_t('nav.openLibrary')} onClick={() => setShowSettingsPage(false)}>
                 <Film size={16} aria-hidden="true" />
                 <span className="actionLabel">{_t('nav.library')}</span>
