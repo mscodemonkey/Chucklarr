@@ -1,8 +1,15 @@
+/**
+ * Checks GitHub for Chucklarr updates and installs approved updates into the
+ * current container. The data directory owns update history, while build-ref
+ * identifies the application files that are actually running.
+ */
+
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { env } from './env';
+import { normaliseCommitSha, resolveCurrentSha } from './updateVersion';
 import type { UpdateStatus } from '../shared/types';
 
 const execFileAsync = promisify(execFile);
@@ -36,10 +43,12 @@ type GithubCommitResponse = {
   html_url?: string;
 };
 
+/** Returns the most recently calculated update status. */
 export function getUpdateStatus(): UpdateStatus {
   return { ...cachedStatus };
 }
 
+/** Checks the configured GitHub branch against the code in this container. */
 export async function refreshUpdateStatus(): Promise<UpdateStatus> {
   if (!cachedStatus.enabled) {
     cachedStatus = {
@@ -56,13 +65,12 @@ export async function refreshUpdateStatus(): Promise<UpdateStatus> {
   cachedStatus = { ...cachedStatus, checking: true, error: null };
 
   try {
-    const [state, buildRef, latestCommit] = await Promise.all([
-      readUpdateState(),
+    const [buildRef, latestCommit] = await Promise.all([
       readBuildRef(),
       githubJson<GithubCommitResponse>(commitApiPath())
     ]);
-    const currentSha = normaliseSha(state.installedSha) ?? normaliseSha(env.updateBuildRef) ?? normaliseSha(buildRef);
-    const latestSha = normaliseSha(latestCommit.sha);
+    const currentSha = resolveCurrentSha(buildRef, env.updateBuildRef);
+    const latestSha = normaliseCommitSha(latestCommit.sha);
     const updateAvailable = Boolean(currentSha && latestSha && currentSha !== latestSha);
     const message = !currentSha
       ? 'This build does not include a Git commit SHA, so Chucklarr cannot safely compare it with GitHub.'
@@ -95,6 +103,7 @@ export async function refreshUpdateStatus(): Promise<UpdateStatus> {
   return getUpdateStatus();
 }
 
+/** Downloads, builds, and installs the latest confirmed GitHub update. */
 export async function applyUpdate(): Promise<UpdateStatus> {
   if (!env.allowAutoUpdate) {
     throw new Error('Auto-update is disabled for this build.');
@@ -137,6 +146,7 @@ export async function applyUpdate(): Promise<UpdateStatus> {
     await replacePath(path.join(appRoot, 'node_modules'), path.join(sourceDir, 'node_modules'));
     await fs.copyFile(path.join(sourceDir, 'package.json'), path.join(appRoot, 'package.json'));
     await fs.copyFile(path.join(sourceDir, 'package-lock.json'), path.join(appRoot, 'package-lock.json'));
+    await writeBuildRef(status.latestSha);
     await writeUpdateState({ installedSha: status.latestSha, installedAt: new Date().toISOString() });
 
     cachedStatus = {
@@ -175,25 +185,16 @@ function latestCommitUrl(sha: string | null): string | null {
   return sha ? `https://github.com/${env.updateRepository}/commit/${sha}` : null;
 }
 
-function normaliseSha(value: string | undefined): string | null {
-  const trimmed = value?.trim() ?? '';
-  return /^[a-f0-9]{40}$/i.test(trimmed) ? trimmed : null;
-}
-
-async function readUpdateState(): Promise<UpdateState> {
-  try {
-    return JSON.parse(await fs.readFile(updateStatePath, 'utf8')) as UpdateState;
-  } catch {
-    return {};
-  }
-}
-
 async function readBuildRef(): Promise<string | undefined> {
   try {
     return await fs.readFile(path.join(appRoot, 'build-ref'), 'utf8');
   } catch {
     return undefined;
   }
+}
+
+async function writeBuildRef(sha: string): Promise<void> {
+  await fs.writeFile(path.join(appRoot, 'build-ref'), `${sha}\n`);
 }
 
 async function writeUpdateState(state: UpdateState): Promise<void> {
