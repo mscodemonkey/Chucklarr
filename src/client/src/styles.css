@@ -1263,3 +1263,17 @@ h2 {
     scroll-behavior: auto !important;
   }
 }
+
+.upcomingActions {
+  margin-bottom: 24px;
+}
+.upcomingActions > button {
+  max-width: 100%;
+  white-space: normal;
+}
+.upcomingActions > :not(button) {
+  margin: 0;
+}
+.upcomingActions > :not(button):not(:empty):not(.srOnly) {
+  margin-top: 10px;
+}

@@ -16,6 +16,16 @@ export const supportedLanguages: Array<{ code: LanguageCode; label: string }> = 
 ];
 
 const enGB = {
+  'upcoming.scanAll': 'Scan all comedians',
+  'upcoming.scanning': 'Scanning comedians…',
+  'upcoming.scanSuccess': 'Scan complete. Your specials have been refreshed.',
+  'upcoming.scanFailed':
+    "The scan couldn't finish. Some comedians may have been refreshed. Please try again.",
+  'upcoming.refreshFailed':
+    'The scan finished, but the results could not be refreshed. Please reload the app.',
+  'upcoming.bothFailed':
+    "The scan couldn't finish, and the results could not be refreshed. Please try again.",
+  'upcoming.noScannable': 'Add a comedian from search in Library to start scanning.',
   'nav.upcoming': 'Upcoming',
   'nav.comedians': 'Comedians',
   'library.filter': 'Search your comedians',
@@ -263,6 +273,17 @@ const enUS: TranslationCatalogue = {
 };
 
 const frFR: TranslationCatalogue = {
+  'upcoming.scanAll': 'Analyser tous les humoristes',
+  'upcoming.scanning': 'Analyse des humoristes…',
+  'upcoming.scanSuccess': 'Analyse terminée. Vos spectacles ont été actualisés.',
+  'upcoming.scanFailed':
+    'L’analyse n’a pas pu se terminer. Certains humoristes ont peut-être été actualisés. Veuillez réessayer.',
+  'upcoming.refreshFailed':
+    'L’analyse est terminée, mais les résultats n’ont pas pu être actualisés. Rechargez l’application.',
+  'upcoming.bothFailed':
+    'L’analyse n’a pas pu se terminer et les résultats n’ont pas pu être actualisés. Veuillez réessayer.',
+  'upcoming.noScannable':
+    'Ajoutez un humoriste depuis la recherche de la bibliothèque pour lancer une analyse.',
   'nav.upcoming': 'À venir',
   'nav.comedians': 'Humoristes',
   'library.filter': 'Rechercher dans vos humoristes',

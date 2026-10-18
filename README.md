@@ -1,4 +1,4 @@
-Latest release version: `v0.2.0`
+Latest release version: `v0.2.1`
 
 Latest release date: `2026-10-18`
 
@@ -242,6 +242,8 @@ That directory is mounted into the container by `docker-compose.yml`, so it surv
 ## Changelog
 
 ### 2026-10-18
+
+- Added a visible Scan all comedians button to Upcoming, with progress and persistent completion/error feedback. Scans can take a while and use your existing automatic-add settings. Completed results are refreshed even if a later comedian fails to scan.
 
 - Rebuilt the interface around grouped lists, an Apple-inspired Liquid Glass appearance, a desktop split view and focused phone navigation.
 - Added upcoming specials across followed comedians, ordered by future TMDB release dates. Dates may change and do not promise download availability. Undated announcements are not included.
