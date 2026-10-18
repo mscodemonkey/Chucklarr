@@ -1,7 +1,14 @@
+/**
+ * Supplies typed interface copy for the React application. This module owns
+ * static catalogues only; settings persist the chosen language on the server.
+ */
+
+/** Supported interface locales; metadata titles retain their source language. */
 export type LanguageCode = 'en-GB' | 'en-US' | 'fr-FR';
 
 type TranslationValues = Record<string, string | number>;
 
+/** Settings choices offered by the interface language selector. */
 export const supportedLanguages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'en-GB', label: 'English (UK)' },
   { code: 'en-US', label: 'English (US)' },
@@ -9,6 +16,50 @@ export const supportedLanguages: Array<{ code: LanguageCode; label: string }> = 
 ];
 
 const enGB = {
+  'nav.upcoming': 'Upcoming',
+  'nav.comedians': 'Comedians',
+  'library.filter': 'Search your comedians',
+  'library.upToDate': 'Up to date',
+  'library.reviewCount': '{count} to review',
+  'library.emptyFilter': 'No comedians match your search.',
+  'library.title': 'Your stand-up library',
+  'actions.add': 'Add',
+  'actions.cancel': 'Cancel',
+  'actions.close': 'Close',
+  'detail.matchDetails': 'Match details',
+  'detail.confidence': 'Match confidence: {score}/100',
+  'detail.releaseDate': 'Release date: {date}',
+  'detail.scanned': 'Scanned {date}',
+  'detail.notScanned': 'Ready for its first scan',
+  'detail.scanForSpecials': 'Scan for specials',
+  'detail.more': 'Comedian options',
+  'detail.footer': 'Automatic scans run daily',
+  'comedians.deleteConfirm':
+    'Remove {name} and their saved review decisions? Movies in Radarr will stay as they are.',
+  'upcoming.title': 'Upcoming specials',
+  'upcoming.help':
+    'Future releases found in scans of your comedians. Dates come from TMDB and may change. They do not indicate download availability.',
+  'upcoming.empty':
+    'No upcoming specials found yet. Scan your comedians to discover dated future releases. Undated announcements are not included.',
+  'films.title': 'Also appears in',
+  'films.hint': 'Other films, kept separate from your specials.',
+  'films.loading': 'Finding film appearances…',
+  'films.refreshing': 'Refreshing Radarr status…',
+  'films.retry': 'Try again',
+  'films.statusUnavailable': 'Radarr status is unavailable. Check your connection before adding films.',
+  'films.error': 'Film appearances could not be loaded. Please try again.',
+  'films.addError': 'Radarr could not update this film. Please check your connection and try again.',
+  'films.refreshError':
+    'The film was updated, but its latest Radarr status could not be loaded. Try refreshing the list.',
+  'films.monitor': 'Monitor',
+  'films.working': 'Saving…',
+  'films.added': '{title} added to Radarr.',
+  'films.monitoredNotice': '{title} is now monitored in Radarr.',
+  'films.empty': 'No other film appearances found.',
+  'films.disclaimer':
+    'Film credits come from your configured metadata source. Some titles may be misclassified. Films are never automatically added.',
+  'radarr.unmonitored': 'Unmonitored',
+  'radarr.statusUnavailable': 'Radarr status is unavailable. Showing the last known library state.',
   'app.subtitle': 'A stand-up Radarr companion',
   'nav.library': 'Library',
   'nav.openLibrary': 'Open library',
@@ -29,13 +80,17 @@ const enGB = {
   'settings.group.appearance': 'Appearance',
   'settings.group.appearanceHelp': 'Choose how Chucklarr should look on this device.',
   'settings.group.tmdb': 'TheMovieDB',
-  'settings.group.tmdbHelp': 'Chucklarr uses TMDB metadata to find comedian credits and likely stand-up specials.',
+  'settings.group.tmdbHelp':
+    'Chucklarr uses TMDB metadata to find comedian credits and likely stand-up specials.',
   'settings.group.radarr': 'Radarr',
-  'settings.group.radarrHelp': 'Connect to Radarr so approved specials can be added with the right profile and folder.',
+  'settings.group.radarrHelp':
+    'Connect to Radarr so approved specials can be added with the right profile and folder.',
   'settings.group.automation': 'Automatic processing',
-  'settings.group.automationHelp': 'Set score thresholds for automatic add and ignore decisions during scans.',
+  'settings.group.automationHelp':
+    'Set score thresholds for automatic add and ignore decisions during scans.',
   'settings.group.backupRestore': 'Backup and restore',
-  'settings.group.backupRestoreHelp': 'Export everything Chucklarr needs to move machines, or restore a previous backup file.',
+  'settings.group.backupRestoreHelp':
+    'Export everything Chucklarr needs to move machines, or restore a previous backup file.',
   'settings.language': 'Language',
   'settings.theme': 'Theme',
   'settings.theme.system': 'Follow system',
@@ -47,17 +102,25 @@ const enGB = {
   'settings.metadataServiceUrl': 'Metadata service URL',
   'settings.metadataServiceHint': 'Use a hosted proxy so users do not need their own TMDB key.',
   'settings.tmdbToken': 'TMDB bearer token',
-  'settings.help.language': 'Changes the app interface only. Your saved comedians and Radarr matches stay as they are.',
-  'settings.help.theme': 'Follow system uses your device preference and switches automatically when that preference changes.',
-  'settings.help.metadataSource': 'Use the hosted service for normal installs, or choose a custom token for local development.',
-  'settings.help.tmdbToken': 'Only required when you choose a custom TMDB token instead of the hosted metadata service.',
-  'settings.help.radarrUrl': 'Use the base address for Radarr, for example http://localhost:7878 or your Docker service URL.',
+  'settings.help.language':
+    'Changes the app interface only. Your saved comedians and Radarr matches stay as they are.',
+  'settings.help.theme':
+    'Follow system uses your device preference and switches automatically when that preference changes.',
+  'settings.help.metadataSource':
+    'Use the hosted service for normal installs, or choose a custom token for local development.',
+  'settings.help.tmdbToken':
+    'Only required when you choose a custom TMDB token instead of the hosted metadata service.',
+  'settings.help.radarrUrl':
+    'Use the base address for Radarr, for example http://localhost:7878 or your Docker service URL.',
   'settings.help.radarrApiKey': 'Find this in Radarr under Settings, then General.',
   'settings.help.qualityProfile': 'Newly added specials will use this Radarr quality profile.',
   'settings.help.rootFolder': 'Newly added specials will be created under this Radarr root folder.',
-  'settings.help.minimumAvailability': 'Controls the minimum release status sent to Radarr when adding a movie.',
-  'settings.help.autoAddAbove': 'Comedy specials at or above this score are sent to Radarr automatically during scans.',
-  'settings.help.autoIgnoreBelow': 'Comedy specials below this score are ignored automatically and hidden from review.',
+  'settings.help.minimumAvailability':
+    'Controls the minimum release status sent to Radarr when adding a movie.',
+  'settings.help.autoAddAbove':
+    'Comedy specials at or above this score are sent to Radarr automatically during scans.',
+  'settings.help.autoIgnoreBelow':
+    'Comedy specials below this score are ignored automatically and hidden from review.',
   'settings.radarrUrl': 'Radarr URL',
   'settings.radarrApiKey': 'Radarr API key',
   'settings.testConnection': 'Test connection',
@@ -76,7 +139,8 @@ const enGB = {
   'settings.availability.released': 'Released',
   'settings.autoAddAbove': 'Auto-add above',
   'settings.autoIgnoreBelow': 'Auto-ignore below',
-  'settings.backupPrivacy': 'Backup files include settings, saved comedians, review decisions, and API keys. Keep them somewhere private.',
+  'settings.backupPrivacy':
+    'Backup files include settings, saved comedians, review decisions, and API keys. Keep them somewhere private.',
   'settings.downloadBackup': 'Download backup',
   'settings.restoreBackup': 'Restore backup',
   'settings.restoreBackupFile': 'Choose a Chucklarr backup file to restore',
@@ -98,7 +162,8 @@ const enGB = {
   'comedians.saved': 'Featured comedians',
   'comedians.savedWithCount': 'Featured comedians ({count})',
   'comedians.empty': 'Add a comedian to start tracking specials.',
-  'comedians.openRow': 'Open {name}. {available} available, {monitored} of {remaining} remaining results monitored.{reviewSuffix}',
+  'comedians.openRow':
+    'Open {name}. {available} available, {monitored} of {remaining} remaining results monitored.{reviewSuffix}',
   'comedians.reviewSuffix': ' {count} new {item} to review.',
   'comedians.candidateSingular': 'comedy special',
   'comedians.candidatePlural': 'comedy specials',
@@ -108,7 +173,8 @@ const enGB = {
   'comedians.newReviewTitle': '{count} new {item} to review',
   'comedians.resultCounter': '{available} Available, {monitored} / {remaining} Monitored',
   'comedians.resultCounterCompact': '{available} / {total} Available',
-  'comedians.resultCounterTitle': '{available} downloaded out of {total} possible results. {monitored} of the remaining {remaining} monitored.',
+  'comedians.resultCounterTitle':
+    '{available} downloaded out of {total} possible results. {monitored} of the remaining {remaining} monitored.',
   'comedians.scan': 'Scan {name}',
   'comedians.scanning': 'Scanning {name}',
   'comedians.delete': 'Delete {name}',
@@ -116,7 +182,8 @@ const enGB = {
   'detail.addingComedianTitle': 'Adding comedian',
   'detail.addingComedianHint': 'Fetching TMDB details and preparing the review queue.',
   'detail.noSelectionTitle': 'No comedian selected',
-  'detail.noSelectionHint': 'Choose a comedian from the list to review possible specials and current Radarr matches.',
+  'detail.noSelectionHint':
+    'Choose a comedian from the list to review possible specials and current Radarr matches.',
   'detail.selectedHint': 'Review possible specials and current Radarr matches.',
   'detail.chooseHint': 'Choose a comedian to review matches.',
   'detail.linksLabel': '{name} external links',
@@ -168,7 +235,8 @@ const enGB = {
   'status.rejected': 'Rejected',
   'notice.settingsSaved': 'Settings saved.',
   'notice.backupDownloaded': 'Backup downloaded.',
-  'notice.backupRestored': 'Backup restored: {settings} settings, {comedians} comedians, and {candidates} comedy specials.',
+  'notice.backupRestored':
+    'Backup restored: {settings} settings, {comedians} comedians, and {candidates} comedy specials.',
   'notice.radarrConnected': 'Radarr connected. Choose a quality profile and root folder.',
   'notice.noPeopleFound': 'No TMDB people found for {name}.',
   'notice.peopleFound': 'Found {count} possible matches.',
@@ -195,6 +263,51 @@ const enUS: TranslationCatalogue = {
 };
 
 const frFR: TranslationCatalogue = {
+  'nav.upcoming': 'À venir',
+  'nav.comedians': 'Humoristes',
+  'library.filter': 'Rechercher dans vos humoristes',
+  'library.upToDate': 'À jour',
+  'library.reviewCount': '{count} à examiner',
+  'library.emptyFilter': 'Aucun humoriste ne correspond à votre recherche.',
+  'library.title': 'Votre bibliothèque de stand-up',
+  'actions.add': 'Ajouter',
+  'actions.cancel': 'Annuler',
+  'actions.close': 'Fermer',
+  'detail.matchDetails': 'Détails de la correspondance',
+  'detail.confidence': 'Score de correspondance : {score}/100',
+  'detail.releaseDate': 'Date de sortie : {date}',
+  'detail.scanned': 'Analysé le {date}',
+  'detail.notScanned': 'Prêt pour une première analyse',
+  'detail.scanForSpecials': 'Rechercher des spectacles',
+  'detail.more': 'Options de l’humoriste',
+  'detail.footer': 'Analyse automatique quotidienne',
+  'comedians.deleteConfirm':
+    'Supprimer {name} et ses décisions enregistrées ? Les films dans Radarr seront conservés.',
+  'upcoming.title': 'Spectacles à venir',
+  'upcoming.help':
+    'Sorties à venir trouvées lors des analyses de vos humoristes. Les dates de TMDB peuvent changer et ne garantissent pas la disponibilité au téléchargement.',
+  'upcoming.empty':
+    'Aucun spectacle à venir trouvé. Analysez vos humoristes pour découvrir les prochaines sorties datées. Les annonces sans date ne sont pas incluses.',
+  'films.title': 'Apparaît aussi dans',
+  'films.hint': 'Autres films, présentés séparément des spectacles.',
+  'films.loading': 'Recherche de films…',
+  'films.refreshing': 'Actualisation du statut Radarr…',
+  'films.retry': 'Réessayer',
+  'films.statusUnavailable':
+    'Le statut Radarr est indisponible. Vérifiez votre connexion avant d’ajouter des films.',
+  'films.error': 'Impossible de charger les films. Veuillez réessayer.',
+  'films.addError': 'Radarr n’a pas pu mettre à jour ce film. Vérifiez votre connexion et réessayez.',
+  'films.refreshError':
+    'Le film a été mis à jour, mais son statut Radarr est indisponible. Actualisez la liste.',
+  'films.monitor': 'Surveiller',
+  'films.working': 'Enregistrement…',
+  'films.added': '{title} ajouté à Radarr.',
+  'films.monitoredNotice': '{title} est maintenant surveillé dans Radarr.',
+  'films.empty': 'Aucune autre apparition dans un film.',
+  'films.disclaimer':
+    'Les crédits proviennent de votre source de métadonnées. Certaines catégories peuvent être inexactes. Les films ne sont jamais ajoutés automatiquement.',
+  'radarr.unmonitored': 'Non surveillé',
+  'radarr.statusUnavailable': 'Le statut Radarr est indisponible. Le dernier état connu est affiché.',
   'app.subtitle': 'Un compagnon stand-up pour Radarr',
   'nav.library': 'Bibliothèque',
   'nav.openLibrary': 'Ouvrir la bibliothèque',
@@ -215,13 +328,17 @@ const frFR: TranslationCatalogue = {
   'settings.group.appearance': 'Apparence',
   'settings.group.appearanceHelp': "Choisissez l'apparence de Chucklarr sur cet appareil.",
   'settings.group.tmdb': 'TheMovieDB',
-  'settings.group.tmdbHelp': 'Chucklarr utilise les metadonnees TMDB pour trouver les credits des humoristes et les spectacles stand-up probables.',
+  'settings.group.tmdbHelp':
+    'Chucklarr utilise les metadonnees TMDB pour trouver les credits des humoristes et les spectacles stand-up probables.',
   'settings.group.radarr': 'Radarr',
-  'settings.group.radarrHelp': 'Connectez Radarr afin que les spectacles approuves soient ajoutes avec le bon profil et le bon dossier.',
+  'settings.group.radarrHelp':
+    'Connectez Radarr afin que les spectacles approuves soient ajoutes avec le bon profil et le bon dossier.',
   'settings.group.automation': 'Traitement automatique',
-  'settings.group.automationHelp': "Definissez les seuils de score pour les decisions d'ajout et d'ignorance automatiques pendant les analyses.",
+  'settings.group.automationHelp':
+    "Definissez les seuils de score pour les decisions d'ajout et d'ignorance automatiques pendant les analyses.",
   'settings.group.backupRestore': 'Sauvegarde et restauration',
-  'settings.group.backupRestoreHelp': 'Exportez tout ce dont Chucklarr a besoin pour changer de machine, ou restaurez un fichier de sauvegarde precedent.',
+  'settings.group.backupRestoreHelp':
+    'Exportez tout ce dont Chucklarr a besoin pour changer de machine, ou restaurez un fichier de sauvegarde precedent.',
   'settings.language': 'Langue',
   'settings.theme': 'Theme',
   'settings.theme.system': 'Suivre le systeme',
@@ -231,19 +348,28 @@ const frFR: TranslationCatalogue = {
   'settings.metadataSource.service': 'Service de metadonnees Chucklarr',
   'settings.metadataSource.tmdb': 'Jeton TMDB personnalise',
   'settings.metadataServiceUrl': 'URL du service de metadonnees',
-  'settings.metadataServiceHint': "Utilisez un proxy heberge pour eviter aux utilisateurs d'avoir leur propre cle TMDB.",
+  'settings.metadataServiceHint':
+    "Utilisez un proxy heberge pour eviter aux utilisateurs d'avoir leur propre cle TMDB.",
   'settings.tmdbToken': 'Jeton bearer TMDB',
-  'settings.help.language': "Modifie uniquement l'interface de l'application. Vos humoristes et correspondances Radarr restent inchanges.",
-  'settings.help.theme': "Suivre le systeme utilise la preference de votre appareil et change automatiquement avec elle.",
-  'settings.help.metadataSource': 'Utilisez le service heberge pour une installation normale, ou choisissez un jeton personnalise pour le developpement local.',
-  'settings.help.tmdbToken': "Necessaire uniquement si vous choisissez un jeton TMDB personnalise au lieu du service de metadonnees heberge.",
-  'settings.help.radarrUrl': "Utilisez l'adresse de base de Radarr, par exemple http://localhost:7878 ou l'URL du service Docker.",
+  'settings.help.language':
+    "Modifie uniquement l'interface de l'application. Vos humoristes et correspondances Radarr restent inchanges.",
+  'settings.help.theme':
+    'Suivre le systeme utilise la preference de votre appareil et change automatiquement avec elle.',
+  'settings.help.metadataSource':
+    'Utilisez le service heberge pour une installation normale, ou choisissez un jeton personnalise pour le developpement local.',
+  'settings.help.tmdbToken':
+    'Necessaire uniquement si vous choisissez un jeton TMDB personnalise au lieu du service de metadonnees heberge.',
+  'settings.help.radarrUrl':
+    "Utilisez l'adresse de base de Radarr, par exemple http://localhost:7878 ou l'URL du service Docker.",
   'settings.help.radarrApiKey': 'Trouvez-la dans Radarr, sous Parametres, puis General.',
   'settings.help.qualityProfile': 'Les nouveaux spectacles ajoutes utiliseront ce profil de qualite Radarr.',
   'settings.help.rootFolder': 'Les nouveaux spectacles ajoutes seront crees dans ce dossier racine Radarr.',
-  'settings.help.minimumAvailability': "Controle le statut de sortie minimum envoye a Radarr lors de l'ajout d'un film.",
-  'settings.help.autoAddAbove': "Les specials d'humour a ce score ou au-dessus sont envoyes automatiquement a Radarr pendant les analyses.",
-  'settings.help.autoIgnoreBelow': "Les specials d'humour sous ce score sont ignores automatiquement et masques de la revue.",
+  'settings.help.minimumAvailability':
+    "Controle le statut de sortie minimum envoye a Radarr lors de l'ajout d'un film.",
+  'settings.help.autoAddAbove':
+    "Les specials d'humour a ce score ou au-dessus sont envoyes automatiquement a Radarr pendant les analyses.",
+  'settings.help.autoIgnoreBelow':
+    "Les specials d'humour sous ce score sont ignores automatiquement et masques de la revue.",
   'settings.radarrUrl': 'URL Radarr',
   'settings.radarrApiKey': 'Clé API Radarr',
   'settings.testConnection': 'Tester la connexion',
@@ -262,12 +388,14 @@ const frFR: TranslationCatalogue = {
   'settings.availability.released': 'Sorti',
   'settings.autoAddAbove': 'Ajout auto au-dessus de',
   'settings.autoIgnoreBelow': 'Ignorer auto en dessous de',
-  'settings.backupPrivacy': 'Les sauvegardes incluent les parametres, les humoristes enregistres, les decisions de revue et les cles API. Conservez-les dans un endroit prive.',
+  'settings.backupPrivacy':
+    'Les sauvegardes incluent les parametres, les humoristes enregistres, les decisions de revue et les cles API. Conservez-les dans un endroit prive.',
   'settings.downloadBackup': 'Telecharger la sauvegarde',
   'settings.restoreBackup': 'Restaurer une sauvegarde',
   'settings.restoreBackupFile': 'Choisir un fichier de sauvegarde Chucklarr a restaurer',
   'settings.save': 'Enregistrer',
-  'settings.tmdbAttribution': "Ce produit utilise l'API TMDB, mais il n'est ni approuve ni certifie par TMDB.",
+  'settings.tmdbAttribution':
+    "Ce produit utilise l'API TMDB, mais il n'est ni approuve ni certifie par TMDB.",
   'settings.tmdbAttributionLink': 'En savoir plus sur TMDB.',
   'comedians.title': "Votre club d'humour",
   'comedians.addNew': 'Ajouter un nouvel humoriste',
@@ -284,7 +412,8 @@ const frFR: TranslationCatalogue = {
   'comedians.saved': 'Humoristes en vedette',
   'comedians.savedWithCount': 'Humoristes en vedette ({count})',
   'comedians.empty': 'Ajoutez un humoriste pour commencer à suivre les spectacles.',
-  'comedians.openRow': 'Ouvrir {name}. {available} disponible(s), {monitored} résultat(s) surveillé(s) sur {remaining} restant(s).{reviewSuffix}',
+  'comedians.openRow':
+    'Ouvrir {name}. {available} disponible(s), {monitored} résultat(s) surveillé(s) sur {remaining} restant(s).{reviewSuffix}',
   'comedians.reviewSuffix': ' {count} nouveau(x) {item} à examiner.',
   'comedians.candidateSingular': "special d'humour",
   'comedians.candidatePlural': "specials d'humour",
@@ -294,7 +423,8 @@ const frFR: TranslationCatalogue = {
   'comedians.newReviewTitle': '{count} nouveau(x) {item} à examiner',
   'comedians.resultCounter': '{available} disponibles, {monitored} / {remaining} surveillés',
   'comedians.resultCounterCompact': '{available} / {total} disponibles',
-  'comedians.resultCounterTitle': '{available} téléchargé(s) sur {total} résultats possibles. {monitored} sur les {remaining} restant(s) sont surveillés.',
+  'comedians.resultCounterTitle':
+    '{available} téléchargé(s) sur {total} résultats possibles. {monitored} sur les {remaining} restant(s) sont surveillés.',
   'comedians.scan': 'Analyser {name}',
   'comedians.scanning': 'Analyse de {name}',
   'comedians.delete': 'Supprimer {name}',
@@ -302,7 +432,8 @@ const frFR: TranslationCatalogue = {
   'detail.addingComedianTitle': "Ajout de l'humoriste",
   'detail.addingComedianHint': 'Récupération des détails TMDB et préparation de la file de revue.',
   'detail.noSelectionTitle': 'Aucun humoriste sélectionné',
-  'detail.noSelectionHint': 'Choisissez un humoriste dans la liste pour examiner les spectacles possibles et les correspondances Radarr.',
+  'detail.noSelectionHint':
+    'Choisissez un humoriste dans la liste pour examiner les spectacles possibles et les correspondances Radarr.',
   'detail.selectedHint': 'Examinez les spectacles possibles et les correspondances Radarr actuelles.',
   'detail.chooseHint': 'Choisissez un humoriste pour examiner les correspondances.',
   'detail.linksLabel': 'Liens externes de {name}',
@@ -354,7 +485,8 @@ const frFR: TranslationCatalogue = {
   'status.rejected': 'rejeté',
   'notice.settingsSaved': 'Paramètres enregistrés.',
   'notice.backupDownloaded': 'Sauvegarde telechargee.',
-  'notice.backupRestored': "Sauvegarde restauree : {settings} parametres, {comedians} humoristes et {candidates} specials d'humour.",
+  'notice.backupRestored':
+    "Sauvegarde restauree : {settings} parametres, {comedians} humoristes et {candidates} specials d'humour.",
   'notice.radarrConnected': 'Radarr connecté. Choisissez un profil de qualité et un dossier racine.',
   'notice.noPeopleFound': 'Aucune personne TMDB trouvée pour {name}.',
   'notice.peopleFound': '{count} correspondances possibles trouvées.',
@@ -378,10 +510,12 @@ const catalogues: Record<LanguageCode, TranslationCatalogue> = {
   'fr-FR': frFR
 };
 
+/** Falls back to British English for missing or unsupported saved locale values. */
 export function normaliseLanguage(language?: string): LanguageCode {
   return language === 'en-US' || language === 'fr-FR' ? language : 'en-GB';
 }
 
+/** Creates a typed text formatter with English fallback for the selected locale. */
 export function createTranslator(language?: string) {
   const catalogue = catalogues[normaliseLanguage(language)];
 

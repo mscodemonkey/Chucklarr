@@ -1,3 +1,8 @@
+/**
+ * Adapts Radarr movie operations for server routes and scans. Clients own their
+ * settings snapshot; Radarr owns monitoring, downloads and filesystem paths.
+ */
+
 import type {
   AppSettings,
   Candidate,
@@ -36,6 +41,7 @@ type RadarrValidationFailure = {
   errorCode?: string;
 };
 
+/** Carries upstream validation evidence for duplicate-path recovery within one request. */
 class RadarrRequestError extends Error {
   constructor(
     message: string,
@@ -47,23 +53,29 @@ class RadarrRequestError extends Error {
   }
 }
 
+/**
+ * Performs server-side Radarr operations with an immutable settings snapshot.
+ * Routes and scans own its short lifecycle. This client never deletes files,
+ * and add operations reuse existing movies before creating a monitored entry.
+ */
 export class RadarrClient {
   constructor(private readonly settings: AppSettings) {}
 
-  // A basic connection can read Radarr options and library state. Adding movies
-  // also needs a quality profile and root folder, so that uses configured below.
+  /** Whether library reads can be attempted, independently of add configuration. */
   get connectionConfigured(): boolean {
     return Boolean(this.settings.radarrUrl.trim() && this.settings.radarrApiKey.trim());
   }
 
+  /** Whether additions have a destination and quality policy as well as credentials. */
   get configured(): boolean {
     return Boolean(
       this.connectionConfigured &&
-        this.settings.radarrQualityProfileId.trim() &&
-        this.settings.radarrRootFolderPath.trim()
+      this.settings.radarrQualityProfileId.trim() &&
+      this.settings.radarrRootFolderPath.trim()
     );
   }
 
+  /** Tests the connection and returns selectable quality profiles and destinations. */
   async options(): Promise<RadarrOptions> {
     if (!this.connectionConfigured) {
       return {
@@ -104,7 +116,8 @@ export class RadarrClient {
     }
   }
 
-  async addMovie(candidate: Candidate): Promise<RadarrMovie> {
+  /** Adds or re-monitors a movie using saved settings, recovering duplicate IDs and paths. */
+  async addMovie<T extends Pick<Candidate, 'tmdbMovieId' | 'title'>>(candidate: T): Promise<RadarrMovie> {
     if (!this.configured) {
       throw new Error('Radarr URL, API key, quality profile, and root folder must be configured.');
     }
@@ -135,7 +148,8 @@ export class RadarrClient {
 
       return response.json() as Promise<RadarrMovie>;
     } catch (caught) {
-      const duplicatePath = caught instanceof RadarrRequestError ? duplicateMoviePath(caught.validationFailures) : null;
+      const duplicatePath =
+        caught instanceof RadarrRequestError ? duplicateMoviePath(caught.validationFailures) : null;
       if (!duplicatePath) {
         throw caught;
       }
@@ -145,10 +159,13 @@ export class RadarrClient {
         return this.setMovieMonitored(movie.id, true);
       }
 
-      throw new Error(`Radarr already has a movie configured at ${duplicatePath}, but Chucklarr could not find it in Radarr's movie list.`);
+      throw new Error(
+        `Radarr already has a movie configured at ${duplicatePath}, but Chucklarr could not find it in Radarr's movie list.`
+      );
     }
   }
 
+  /** Changes monitoring in Radarr without changing local review decisions. */
   async setMovieMonitored(movieId: number, monitored: boolean): Promise<RadarrMovie> {
     if (!this.connectionConfigured) {
       throw new Error('Radarr URL and API key must be configured.');
@@ -169,12 +186,14 @@ export class RadarrClient {
     return response.json() as Promise<RadarrMovie>;
   }
 
+  /** Indexes the remote library by stable metadata ID, including unmonitored movies. */
   async existingMoviesByTmdbId(): Promise<Map<number, RadarrMovie>> {
     if (!this.connectionConfigured) {
       return new Map();
     }
 
     const movies = await this.get<RadarrMovie[]>('/api/v3/movie');
+
     // TMDB IDs are the stable cross-service identifier. Titles and years can be
     // localised or corrected independently in TMDB and Radarr.
     return new Map(
@@ -184,6 +203,7 @@ export class RadarrClient {
     );
   }
 
+  /** Finds an existing entry for duplicate-path recovery without altering its files. */
   async existingMovieByPath(path: string): Promise<RadarrMovie | null> {
     if (!this.connectionConfigured) {
       return null;
@@ -194,6 +214,7 @@ export class RadarrClient {
     return movies.find((movie) => normaliseRadarrPath(movie.path) === normalisedPath) ?? null;
   }
 
+  /** Reads monitored entries only; downloaded state is supplied by Radarr. */
   async monitoredMovies(): Promise<RadarrMonitoredMovie[]> {
     if (!this.connectionConfigured) {
       return [];
@@ -202,6 +223,7 @@ export class RadarrClient {
     return (await this.movies()).filter((movie) => movie.monitored);
   }
 
+  /** Reads all remote movie states. Missing connection fields yield an empty list. */
   async movies(): Promise<RadarrMonitoredMovie[]> {
     if (!this.connectionConfigured) {
       return [];
@@ -222,6 +244,7 @@ export class RadarrClient {
       .sort((first, second) => first.title.localeCompare(second.title));
   }
 
+  /** Removes the Radarr entry while explicitly retaining downloaded files. */
   async removeMovie(movieId: number): Promise<void> {
     if (!this.connectionConfigured) {
       throw new Error('Radarr URL and API key must be configured.');
@@ -265,7 +288,9 @@ function parseRadarrValidationFailures(text: string): RadarrValidationFailure[] 
       return [];
     }
 
-    return parsed.filter((failure): failure is RadarrValidationFailure => typeof failure === 'object' && failure !== null);
+    return parsed.filter(
+      (failure): failure is RadarrValidationFailure => typeof failure === 'object' && failure !== null
+    );
   } catch {
     return [];
   }
@@ -284,5 +309,8 @@ function duplicateMoviePath(failures: RadarrValidationFailure[]): string | null 
 }
 
 function normaliseRadarrPath(path: string | undefined): string {
-  return (path ?? '').trim().replace(/[\\/]+$/, '').toLowerCase();
+  return (path ?? '')
+    .trim()
+    .replace(/[\\/]+$/, '')
+    .toLowerCase();
 }

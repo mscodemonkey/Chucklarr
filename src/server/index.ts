@@ -1,3 +1,9 @@
+/**
+ * Hosts the Chucklarr HTTP boundary. Routes own explicit external writes while
+ * database and service adapters own state. Production startup owns scheduling
+ * and update checks; tests import the app without starting background work.
+ */
+
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +12,7 @@ import {
   createBackup,
   deleteComedian,
   getCandidate,
+  getComedian,
   getSettings,
   listCandidates,
   listComedians,
@@ -17,6 +24,7 @@ import {
   updateSettings
 } from './db';
 import { env } from './env';
+import { selectFilmAppearances } from './appearances';
 import { originFromPlaceOfBirth } from './origin';
 import { searchComedianPeople } from './personSearch';
 import { RadarrClient } from './radarr';
@@ -26,7 +34,8 @@ import { TmdbClient } from './tmdb';
 import { applyUpdate, getUpdateStatus, refreshUpdateStatus } from './updater';
 import type { AppSettings, CandidateStatus } from '../shared/types';
 
-const app = express();
+/** Express application consumed by production startup and isolated HTTP tests. */
+export const app = express();
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(dirname, '../client');
 
@@ -176,7 +185,8 @@ app.post(
         : tmdb.configured
           ? await tmdb.searchPerson(name)
           : null;
-    const details = person?.id && tmdb.configured ? await tmdb.personDetails(person.id).catch(() => null) : null;
+    const details =
+      person?.id && tmdb.configured ? await tmdb.personDetails(person.id).catch(() => null) : null;
     const origin = originFromPlaceOfBirth(details?.place_of_birth ?? null);
     const comedian = createComedian({
       name: details?.name ?? person?.name ?? name,
@@ -229,6 +239,124 @@ function normaliseHomepage(homepage: string | null): string | null {
   const trimmed = homepage?.trim() ?? '';
   return /^https?:\/\//i.test(trimmed) ? trimmed : null;
 }
+
+const filmAddsInFlight = new Set<number>();
+
+function positiveId(value: string): number | null {
+  if (!/^[1-9]\d*$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+function filmComedian(request: express.Request, response: express.Response) {
+  const id = positiveId(String(request.params.id));
+  if (!id) {
+    response.status(400).json({ error: 'A positive integer comedian ID is required.' });
+    return null;
+  }
+  const comedian = getComedian(id);
+  if (!comedian) {
+    response.status(404).json({ error: 'Comedian not found.' });
+    return null;
+  }
+  if (!comedian.tmdbPersonId) {
+    response.status(400).json({ error: 'This comedian has no TMDB person ID.' });
+    return null;
+  }
+  return comedian;
+}
+
+async function filmsForComedian(comedian: NonNullable<ReturnType<typeof filmComedian>>) {
+  const known = new Set(
+    listCandidates()
+      .filter((candidate) => candidate.comedianId === comedian.id)
+      .map((candidate) => candidate.tmdbMovieId)
+  );
+  const credits = await new TmdbClient(getSettings()).personMovieCredits(comedian.tmdbPersonId!, 10_000);
+  return selectFilmAppearances(comedian.name, credits, known);
+}
+
+app.get(
+  '/api/comedians/:id/films',
+  asyncRoute(async (request, response) => {
+    const comedian = filmComedian(request, response);
+    if (!comedian) return;
+    let films;
+    try {
+      films = await filmsForComedian(comedian);
+    } catch {
+      response.status(502).json({ error: 'Film metadata is unavailable. Please try again.' });
+      return;
+    }
+    const radarr = new RadarrClient(getSettings());
+    if (!radarr.connectionConfigured) {
+      response.json({ films, states: [], statusAvailable: false });
+      return;
+    }
+    try {
+      const filmIds = new Set(films.map((film) => film.tmdbMovieId));
+      const states = (await radarr.movies()).flatMap((movie) =>
+        movie.tmdbId != null && filmIds.has(movie.tmdbId)
+          ? [{ tmdbId: movie.tmdbId, radarrId: movie.id, monitored: movie.monitored, hasFile: movie.hasFile }]
+          : []
+      );
+      response.json({ films, states, statusAvailable: true });
+    } catch {
+      response.json({ films, states: [], statusAvailable: false });
+    }
+  })
+);
+
+app.post(
+  '/api/comedians/:id/films/:movieId/add',
+  asyncRoute(async (request, response) => {
+    const comedian = filmComedian(request, response);
+    if (!comedian) return;
+    const movieId = positiveId(String(request.params.movieId));
+    if (!movieId) {
+      response.status(400).json({ error: 'A positive integer movie ID is required.' });
+      return;
+    }
+    const radarr = new RadarrClient(getSettings());
+    if (!radarr.configured) {
+      response
+        .status(400)
+        .json({ error: 'Configure Radarr, a quality profile and a root folder in Settings first.' });
+      return;
+    }
+    if (filmAddsInFlight.has(movieId)) {
+      response.status(409).json({ error: 'This film is already being added. Please wait.' });
+      return;
+    }
+    filmAddsInFlight.add(movieId);
+    try {
+      let films;
+      try {
+        films = await filmsForComedian(comedian);
+      } catch {
+        response.status(502).json({ error: 'Film metadata is unavailable. Nothing was added.' });
+        return;
+      }
+      const film = films.find((item) => item.tmdbMovieId === movieId);
+      if (!film) {
+        response
+          .status(404)
+          .json({ error: 'This movie is not an eligible film appearance for this comedian.' });
+        return;
+      }
+      try {
+        const movie = await radarr.addMovie(film);
+        response.json({ ok: true, radarrMovieId: movie.id ?? null });
+      } catch {
+        response
+          .status(502)
+          .json({ error: 'Radarr could not add this film. Please check the connection and try again.' });
+      }
+    } finally {
+      filmAddsInFlight.delete(movieId);
+    }
+  })
+);
 
 app.delete('/api/comedians/:id', (request, response) => {
   deleteComedian(Number(request.params.id));
@@ -324,14 +452,20 @@ app.get(/.*/, (_request, response) => {
   response.sendFile(path.join(clientDist, 'index.html'));
 });
 
-app.use((error: Error, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
-  response.status(500).json({ error: error.message });
-});
+app.use(
+  (error: Error, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+    response.status(500).json({ error: error.message });
+  }
+);
 
-app.listen(env.port, () => {
-  console.log(`Chucklarr listening on http://localhost:${env.port}`);
-  void refreshUpdateStatus().catch((caught) => {
-    console.warn(caught instanceof Error ? `Update check skipped: ${caught.message}` : 'Update check skipped.');
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(env.port, () => {
+    console.log(`Chucklarr listening on http://localhost:${env.port}`);
+    void refreshUpdateStatus().catch((caught) => {
+      console.warn(
+        caught instanceof Error ? `Update check skipped: ${caught.message}` : 'Update check skipped.'
+      );
+    });
+    startDailyScanScheduler();
   });
-  startDailyScanScheduler();
-});
+}
