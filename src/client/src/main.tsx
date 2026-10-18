@@ -42,6 +42,12 @@ import { createTranslator, normaliseLanguage, supportedLanguages } from './i18n'
 import { isSetupComplete, shouldShowSettings } from './setup';
 import { FilmAppearances } from './FilmAppearances';
 import { isReleaseDate, isWeakRadarrOnlyMatch, localCalendarDate, upcomingSpecials } from './discovery';
+import {
+  readRuntimeHealth,
+  waitForUpdatedRuntime,
+  UpdateRefreshError,
+  type UpdateAttempt
+} from './updateRefresh';
 import './styles.css';
 
 const imageBase = 'https://image.tmdb.org/t/p/w342';
@@ -172,6 +178,10 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updatePhase, setUpdatePhase] = useState<'idle' | 'installing' | 'restarting' | 'failed'>('idle');
+  const [updateFailure, setUpdateFailure] = useState<'install' | 'timeout'>('timeout');
+  const updateActiveRef = useRef(false);
+  const updateAttemptRef = useRef<UpdateAttempt | null>(null);
   const [radarrOptions, setRadarrOptions] = useState<RadarrOptions>(emptyRadarrOptions);
   const [radarrChecking, setRadarrChecking] = useState(false);
   const [radarrChecked, setRadarrChecked] = useState(false);
@@ -179,6 +189,7 @@ function App() {
   const backupInputRef = useRef<HTMLInputElement | null>(null);
   const radarrSyncingRef = useRef(false);
   const _t = useMemo(() => createTranslator(settings.language), [settings.language]);
+  const updatePending = updatePhase === 'installing' || updatePhase === 'restarting';
   const theme = settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system';
 
   const selectedComedian = useMemo(
@@ -764,16 +775,45 @@ function App() {
   }
 
   async function installUpdate() {
+    if (updateActiveRef.current) return;
+    updateActiveRef.current = true;
     setBusy('app-update');
-    setError(null);
-    setNotice(null);
     try {
-      const status = await api<UpdateStatus>('/api/update/apply', { method: 'POST' });
-      setUpdateStatus(status);
-      setNotice(_t('notice.updateRestarting'));
+      let attempt = updateAttemptRef.current;
+      if (!attempt) {
+        setUpdatePhase('installing');
+        const before = await readRuntimeHealth().catch(() => null);
+        attempt = { before, targetSha: updateStatus?.latestSha ?? null, confirmed: false };
+        updateAttemptRef.current = attempt;
+        let status: UpdateStatus | null = null;
+        try {
+          status = await api<UpdateStatus>('/api/update/apply', { method: 'POST' });
+        } catch {
+          // The POST may have installed successfully before its connection closed.
+        }
+        if (status) {
+          setUpdateStatus(status);
+          if (status.error && !status.updating) throw new UpdateRefreshError('install');
+          if (!status.updating && /^[a-f0-9]{40}$/i.test(status.currentSha ?? '')) {
+            attempt.targetSha = status.currentSha;
+            attempt.confirmed = true;
+            if (before?.buildSha?.toLowerCase() === status.currentSha?.toLowerCase()) {
+              window.location.reload();
+              return;
+            }
+          }
+        }
+      }
+      setUpdatePhase('restarting');
+      await waitForUpdatedRuntime(attempt);
+      window.location.reload();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : _t('error.generic'));
+      const failure = caught instanceof UpdateRefreshError ? caught.kind : 'timeout';
+      if (failure === 'install') updateAttemptRef.current = null;
+      setUpdateFailure(failure);
+      setUpdatePhase('failed');
     } finally {
+      updateActiveRef.current = false;
       setBusy(null);
     }
   }
@@ -858,15 +898,27 @@ function App() {
         </div>
       )}
 
-      {updateStatus?.updateAvailable && (
+      {updateStatus && (updateStatus.updateAvailable || updatePhase !== 'idle') && (
         <section className="updateBanner" role="status" aria-live="polite">
           <div>
-            <strong>{_t('update.available')}</strong>
+            <strong>
+              {_t(
+                updatePhase === 'restarting'
+                  ? 'update.restarting'
+                  : updatePhase === 'installing'
+                    ? 'update.installing'
+                    : updatePhase === 'failed'
+                      ? 'update.attention'
+                      : 'update.available'
+              )}
+            </strong>
             <span>
-              {_t('update.details', {
-                current: updateStatus.currentSha?.slice(0, 7) ?? _t('update.unknownVersion'),
-                latest: updateStatus.latestSha?.slice(0, 7) ?? _t('update.unknownVersion')
-              })}
+              {updatePhase === 'failed'
+                ? _t(updateFailure === 'install' ? 'update.installFailed' : 'update.refreshFailed')
+                : _t('update.details', {
+                    current: updateStatus.currentSha?.slice(0, 7) ?? _t('update.unknownVersion'),
+                    latest: updateStatus.latestSha?.slice(0, 7) ?? _t('update.unknownVersion')
+                  })}
             </span>
           </div>
           <div className="updateActions">
@@ -879,16 +931,31 @@ function App() {
             <button
               type="button"
               className="primary"
-              disabled={!updateStatus.canAutoUpdate || busy === 'app-update' || updateStatus.updating}
-              title={!updateStatus.canAutoUpdate ? _t('update.disabled') : _t('update.install')}
+              disabled={
+                updatePending ||
+                (updatePhase === 'idle' && (!updateStatus.canAutoUpdate || updateStatus.updating))
+              }
+              title={
+                updatePhase === 'failed'
+                  ? _t('update.retry')
+                  : !updateStatus.canAutoUpdate
+                    ? _t('update.disabled')
+                    : _t('update.install')
+              }
               onClick={installUpdate}
             >
-              {busy === 'app-update' || updateStatus.updating ? (
+              {updatePending || updateStatus.updating ? (
                 <RefreshCcw className="spin" size={16} aria-hidden="true" />
               ) : (
                 <Download size={16} aria-hidden="true" />
               )}
-              {_t(busy === 'app-update' || updateStatus.updating ? 'update.installing' : 'update.install')}
+              {_t(
+                updatePending
+                  ? 'update.installing'
+                  : updatePhase === 'failed'
+                    ? 'update.retry'
+                    : 'update.install'
+              )}
             </button>
           </div>
         </section>

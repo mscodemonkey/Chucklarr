@@ -5,6 +5,7 @@
  */
 
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -32,12 +33,16 @@ import { scanAllComedians, scanComedian } from './scanner';
 import { startDailyScanScheduler } from './scheduler';
 import { TmdbClient } from './tmdb';
 import { applyUpdate, getUpdateStatus, refreshUpdateStatus } from './updater';
+import { readRunningBuildSha, shouldRestartAfterUpdate } from './updateVersion';
 import type { AppSettings, CandidateStatus } from '../shared/types';
 
 /** Express application consumed by production startup and isolated HTTP tests. */
 export const app = express();
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(dirname, '../client');
+const instanceId = randomUUID();
+const runningSha = readRunningBuildSha(path.join(process.cwd(), 'build-ref'), env.updateBuildRef);
+let restartScheduled = false;
 
 app.use(express.json({ limit: '25mb' }));
 
@@ -50,8 +55,30 @@ function asyncRoute(handler: express.RequestHandler): express.RequestHandler {
   };
 }
 
+/** Runs a restart callback once after a response finishes, closes, or has already disconnected. */
+export function afterUpdateResponse(
+  response: { once(event: 'finish' | 'close', callback: () => void): unknown; readonly destroyed: boolean },
+  restart: () => void
+): void {
+  let completed = false;
+  const finish = () => {
+    if (completed) return;
+    completed = true;
+    restart();
+  };
+  response.once('finish', finish);
+  response.once('close', finish);
+  if (response.destroyed) finish();
+}
+
 app.get('/api/health', (_request, response) => {
-  response.json({ ok: true, name: 'Chucklarr' });
+  response.setHeader('Cache-Control', 'no-store');
+  response.json({ ok: true, name: 'Chucklarr', instanceId, buildSha: runningSha });
+});
+
+app.use('/api/update', (_request, response, next) => {
+  response.setHeader('Cache-Control', 'no-store');
+  next();
 });
 
 app.get('/api/update', (_request, response) => {
@@ -69,10 +96,14 @@ app.post(
   '/api/update/apply',
   asyncRoute(async (_request, response) => {
     const status = await applyUpdate();
-    response.json(status);
-    response.once('finish', () => {
-      setTimeout(() => process.exit(0), 500);
-    });
+    if (shouldRestartAfterUpdate(runningSha, status)) {
+      afterUpdateResponse(response, () => {
+        if (restartScheduled) return;
+        restartScheduled = true;
+        setTimeout(() => process.exit(0), 500);
+      });
+    }
+    if (!response.destroyed) response.json(status);
   })
 );
 
@@ -447,9 +478,15 @@ app.post(
   })
 );
 
-app.use(express.static(clientDist));
+app.use(
+  express.static(clientDist, {
+    setHeaders: (response, filePath) => {
+      if (filePath.endsWith('.html')) response.setHeader('Cache-Control', 'no-store');
+    }
+  })
+);
 app.get(/.*/, (_request, response) => {
-  response.sendFile(path.join(clientDist, 'index.html'));
+  response.sendFile(path.join(clientDist, 'index.html'), { headers: { 'Cache-Control': 'no-store' } });
 });
 
 app.use(
