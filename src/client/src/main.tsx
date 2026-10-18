@@ -52,6 +52,7 @@ const emptyRadarrOptions: RadarrOptions = {
   rootFolders: []
 };
 type DetailTab = 'review' | 'monitored' | 'notMonitored';
+type UpcomingScanFeedback = 'idle' | 'success' | 'scanFailed' | 'refreshFailed' | 'bothFailed';
 type Translator = ReturnType<typeof createTranslator>;
 type RadarrSyncResult = {
   movies: RadarrMonitoredMovie[];
@@ -149,6 +150,10 @@ function App() {
   const [name, setName] = useState('');
   const [showAddComedian, setShowAddComedian] = useState(false);
   const [libraryView, setLibraryView] = useState<'comedians' | 'upcoming'>('comedians');
+  const [upcomingScanFeedback, setUpcomingScanFeedback] = useState<UpcomingScanFeedback>('idle');
+  const scanAllInFlightRef = useRef(false);
+  const candidateRefreshEpoch = useRef(0);
+  const upcomingVisit = useRef(0);
   const [libraryFilter, setLibraryFilter] = useState('');
   const [today, setToday] = useState(localCalendarDate);
   const [radarrUnavailable, setRadarrUnavailable] = useState(false);
@@ -305,16 +310,18 @@ function App() {
   const showingSettings = shouldShowSettings(initialDataLoaded, showSettingsPage, persistedSettings);
 
   async function syncRadarrState() {
-    if (radarrSyncingRef.current) {
+    if (radarrSyncingRef.current || scanAllInFlightRef.current) {
       return;
     }
 
     radarrSyncingRef.current = true;
+    const epoch = candidateRefreshEpoch.current;
     try {
       const [nextRadarrSync, nextCandidates] = await Promise.all([
         api<RadarrSyncResult>('/api/radarr/sync', { method: 'POST' }).catch(() => null),
         api<Candidate[]>('/api/candidates')
       ]);
+      if (epoch !== candidateRefreshEpoch.current) return;
       const synced = new Map(
         nextRadarrSync?.updatedCandidates.map((candidate) => [candidate.id, candidate]) ?? []
       );
@@ -362,6 +369,63 @@ function App() {
       runningRef.current = false;
     }
   }
+
+  /** Refreshes scan-owned records after any outcome without replacing the settings draft. */
+  async function scanAllComedians() {
+    if (runningRef.current || busy || !comedians.some((comedian) => comedian.tmdbPersonId)) return;
+    runningRef.current = true;
+    scanAllInFlightRef.current = true;
+    candidateRefreshEpoch.current++;
+    const visit = upcomingVisit.current;
+    setBusy('scan-all');
+    setUpcomingScanFeedback('idle');
+    let scanFailed = false;
+    let refreshFailed = false;
+    try {
+      try {
+        await api<ScanResult[]>('/api/scan', { method: 'POST' });
+      } catch {
+        scanFailed = true;
+      }
+
+      try {
+        const [nextComedians, nextCandidates] = await Promise.all([
+          api<Comedian[]>('/api/comedians'),
+          api<Candidate[]>('/api/candidates')
+        ]);
+        setComedians(nextComedians);
+        setCandidates(nextCandidates);
+        setSelectedComedianId((current) =>
+          nextComedians.some((comedian) => comedian.id === current) ? current : (nextComedians[0]?.id ?? null)
+        );
+      } catch {
+        refreshFailed = true;
+      }
+
+      if (visit === upcomingVisit.current) {
+        setUpcomingScanFeedback(
+          scanFailed
+            ? refreshFailed
+              ? 'bothFailed'
+              : 'scanFailed'
+            : refreshFailed
+              ? 'refreshFailed'
+              : 'success'
+        );
+      }
+    } finally {
+      scanAllInFlightRef.current = false;
+      runningRef.current = false;
+      setBusy((current) => (current === 'scan-all' ? null : current));
+    }
+  }
+
+  useEffect(() => {
+    if (libraryView !== 'upcoming' || showingSettings) {
+      upcomingVisit.current++;
+      setUpcomingScanFeedback('idle');
+    }
+  }, [libraryView, showingSettings]);
 
   useEffect(() => {
     const updateDay = () => setToday(localCalendarDate());
@@ -1290,6 +1354,46 @@ function App() {
                     <span className="eyebrow">{_t('library.title')}</span>
                     <h2>{_t('upcoming.title')}</h2>
                     <p>{_t('upcoming.help')}</p>
+                  </div>
+                  <div className="upcomingActions">
+                    <button
+                      type="button"
+                      className="glassAction"
+                      disabled={
+                        Boolean(busy) ||
+                        scanAllInFlightRef.current ||
+                        !initialDataLoaded ||
+                        !comedians.some((comedian) => comedian.tmdbPersonId)
+                      }
+                      aria-busy={scanAllInFlightRef.current}
+                      onClick={() => void scanAllComedians()}
+                    >
+                      <RefreshCcw
+                        size={17}
+                        className={scanAllInFlightRef.current ? 'spin' : undefined}
+                        aria-hidden="true"
+                      />
+                      {_t(scanAllInFlightRef.current ? 'upcoming.scanning' : 'upcoming.scanAll')}
+                    </button>
+                    <p className={scanAllInFlightRef.current ? 'srOnly' : 'inlineStatus'} role="status">
+                      {scanAllInFlightRef.current
+                        ? _t('upcoming.scanning')
+                        : upcomingScanFeedback === 'success'
+                          ? _t('upcoming.scanSuccess')
+                          : ''}
+                    </p>
+                    <div className="inlineError" role="alert">
+                      {upcomingScanFeedback === 'scanFailed'
+                        ? _t('upcoming.scanFailed')
+                        : upcomingScanFeedback === 'refreshFailed'
+                          ? _t('upcoming.refreshFailed')
+                          : upcomingScanFeedback === 'bothFailed'
+                            ? _t('upcoming.bothFailed')
+                            : ''}
+                    </div>
+                    {!comedians.some((comedian) => comedian.tmdbPersonId) && (
+                      <p className="footnote">{_t('upcoming.noScannable')}</p>
+                    )}
                   </div>
                   {upcoming.length === 0 ? (
                     <div className="detailEmptyState">
