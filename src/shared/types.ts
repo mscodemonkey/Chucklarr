@@ -174,3 +174,11 @@ export type FilmAppearancesResult = {
   states: FilmRadarrState[];
   statusAvailable: boolean;
 };
+
+/** Process readiness consumed by the updater UI; older servers omit version identity. */
+export type RuntimeHealth = {
+  ok: boolean;
+  name: string;
+  instanceId?: string;
+  buildSha?: string | null;
+};

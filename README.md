@@ -1,4 +1,4 @@
-Latest release version: `v0.2.1`
+Latest release version: `v0.2.2`
 
 Latest release date: `2026-10-18`
 
@@ -242,6 +242,9 @@ That directory is mounted into the container by `docker-compose.yml`, so it surv
 ## Changelog
 
 ### 2026-10-18
+
+- In-app updates now wait for the updated server and refresh the open page automatically. A persistent retry action handles restart delays without repeating installation. Refresh an already-open older page once to load this behaviour.
+- Pinned update downloads to the confirmed commit and prevented incomplete or unchanged installs from restarting the server.
 
 - Added a visible Scan all comedians button to Upcoming, with progress and persistent completion/error feedback. Scans can take a while and use your existing automatic-add settings. Completed results are refreshed even if a later comedian fails to scan.
 

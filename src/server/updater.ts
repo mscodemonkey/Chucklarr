@@ -136,7 +136,7 @@ export async function applyUpdate(): Promise<UpdateStatus> {
 
   try {
     await fs.mkdir(sourceDir, { recursive: true });
-    await downloadFile(tarballUrl(), archivePath);
+    await downloadFile(tarballUrl(env.updateRepository, status.latestSha), archivePath);
     await run('tar', ['-xzf', archivePath, '-C', sourceDir, '--strip-components=1']);
     await run('npm', ['install'], sourceDir);
     await run('npm', ['run', 'build'], sourceDir);
@@ -177,8 +177,11 @@ function commitApiPath(): string {
   return `/repos/${env.updateRepository}/commits/${encodeURIComponent(env.updateBranch)}`;
 }
 
-function tarballUrl(): string {
-  return `${githubApiBase}/repos/${env.updateRepository}/tarball/${encodeURIComponent(env.updateBranch)}`;
+/** Pins an update archive to a confirmed full SHA, never a moving branch. */
+export function tarballUrl(repository: string, sha: string): string {
+  const target = normaliseCommitSha(sha);
+  if (!target) throw new Error('A full Git commit SHA is required for an update archive.');
+  return `${githubApiBase}/repos/${repository}/tarball/${target.toLowerCase()}`;
 }
 
 function latestCommitUrl(sha: string | null): string | null {
