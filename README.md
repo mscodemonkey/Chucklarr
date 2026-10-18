@@ -1,5 +1,6 @@
-Latest release version: `v0.1.2`  
-Latest release date: `2026-05-21`
+Latest release version: `v0.2.0`
+
+Latest release date: `2026-10-18`
 
 # Chucklarr
 
@@ -17,6 +18,8 @@ Movie databases are not especially tidy about stand-up. Specials can be listed a
 - Score likely stand-up specials using title, credit, genre, keyword, runtime, and Radarr-match signals.
 - Split each comedian into `To review`, `Wanted`, and `Not wanted`.
 - Show whether Radarr already has a candidate.
+- Browse upcoming specials with dated future releases from your saved scans.
+- Explore other film appearances and explicitly add or monitor them in Radarr.
 - Add candidates to Radarr.
 - Unmonitor or remove Radarr items when they have not been downloaded yet.
 - Auto-add candidates above a configurable score.
@@ -237,6 +240,15 @@ Your data lives in:
 That directory is mounted into the container by `docker-compose.yml`, so it survives container rebuilds.
 
 ## Changelog
+
+### 2026-10-18
+
+- Rebuilt the interface around grouped lists, an Apple-inspired Liquid Glass appearance, a desktop split view and focused phone navigation.
+- Added upcoming specials across followed comedians, ordered by future TMDB release dates. Dates may change and do not promise download availability. Undated announcements are not included.
+- Added a collapsed Also appears in section for other movie cast credits, with explicit Radarr add or monitor actions. TV and Sonarr are not included.
+- Kept film discovery separate from saved special reviews and automatic additions. Film requests use the configured metadata source, and classification remains heuristic. An ordinary later scan can independently recognise a film as a likely special and move it into the specials lists.
+- Moved match confidence, reasons and descriptions into expandable details, preserved downloaded versus monitored status, and retained setup, backup/restore, daily scans and updates.
+- Added keyboard-accessible tabs, focus treatment and reduced-motion/transparency fallbacks.
 
 ### 2026-05-21
 

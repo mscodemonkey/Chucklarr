@@ -9,12 +9,14 @@ import { createRoot } from 'react-dom/client';
 import {
   Check,
   ChevronLeft,
+  ChevronRight,
+  CalendarDays,
+  MoreHorizontal,
+  Library,
   Download,
   Eye,
-  EyeOff,
   ExternalLink,
   Film,
-  Play,
   Plus,
   Radar,
   RefreshCcw,
@@ -38,6 +40,8 @@ import type {
 } from '../../shared/types';
 import { createTranslator, normaliseLanguage, supportedLanguages } from './i18n';
 import { isSetupComplete, shouldShowSettings } from './setup';
+import { FilmAppearances } from './FilmAppearances';
+import { isReleaseDate, isWeakRadarrOnlyMatch, localCalendarDate, upcomingSpecials } from './discovery';
 import './styles.css';
 
 const imageBase = 'https://image.tmdb.org/t/p/w342';
@@ -84,14 +88,6 @@ function waitForNextPaint(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-function countryFlag(countryCode: string | null): string | null {
-  if (!countryCode || !/^[A-Z]{2}$/.test(countryCode)) {
-    return null;
-  }
-
-  return String.fromCodePoint(...[...countryCode].map((letter) => 127397 + letter.charCodeAt(0)));
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -101,7 +97,9 @@ function titleWithoutComedianName(title: string, comedianName: string | null): s
     return title;
   }
 
-  return title.replace(new RegExp(`^\\s*${escapeRegExp(comedianName)}\\s*[:\\-–—]\\s*`, 'i'), '').trim() || title;
+  return (
+    title.replace(new RegExp(`^\\s*${escapeRegExp(comedianName)}\\s*[:\\-–—]\\s*`, 'i'), '').trim() || title
+  );
 }
 
 function LaughMark() {
@@ -149,6 +147,14 @@ function App() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [monitoredMovies, setMonitoredMovies] = useState<RadarrMonitoredMovie[]>([]);
   const [name, setName] = useState('');
+  const [showAddComedian, setShowAddComedian] = useState(false);
+  const [libraryView, setLibraryView] = useState<'comedians' | 'upcoming'>('comedians');
+  const [libraryFilter, setLibraryFilter] = useState('');
+  const [today, setToday] = useState(localCalendarDate);
+  const [radarrUnavailable, setRadarrUnavailable] = useState(false);
+  const addDialogRef = useRef<HTMLDialogElement | null>(null);
+  const runningRef = useRef(false);
+  const searchControllerRef = useRef<AbortController | null>(null);
   const [personMatches, setPersonMatches] = useState<PersonSearchResult[]>([]);
   const [addingPersonId, setAddingPersonId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('review');
@@ -175,8 +181,10 @@ function App() {
     [comedians, selectedComedianId]
   );
   const selectedComedianScanning = selectedComedian ? busy === `scan-${selectedComedian.id}` : false;
-  const addingComedian = busy === 'add-comedian' || addingPersonId !== null;
-  const monitoredRadarrIds = useMemo(() => new Set(monitoredMovies.map((movie) => movie.id)), [monitoredMovies]);
+  const monitoredRadarrIds = useMemo(
+    () => new Set(monitoredMovies.map((movie) => movie.id)),
+    [monitoredMovies]
+  );
   const monitoredTmdbIds = useMemo(
     () => new Set(monitoredMovies.map((movie) => movie.tmdbId).filter((id): id is number => id != null)),
     [monitoredMovies]
@@ -186,7 +194,12 @@ function App() {
     [monitoredMovies]
   );
   const monitoredMovieByTmdbId = useMemo(
-    () => new Map(monitoredMovies.filter((movie) => movie.tmdbId != null).map((movie) => [movie.tmdbId as number, movie])),
+    () =>
+      new Map(
+        monitoredMovies
+          .filter((movie) => movie.tmdbId != null)
+          .map((movie) => [movie.tmdbId as number, movie])
+      ),
     [monitoredMovies]
   );
   const notMonitoredCandidates = useMemo(() => {
@@ -228,48 +241,6 @@ function App() {
       .filter((status) => groups.has(status))
       .map((status) => ({ status, candidates: groups.get(status) ?? [] }));
   }, [ignoredNotMonitoredCandidates]);
-  const comedianResultCounts = useMemo(() => {
-    type ResultState = 'none' | 'monitored' | 'available';
-    const stateRank: Record<ResultState, number> = {
-      none: 0,
-      monitored: 1,
-      available: 2
-    };
-    const grouped = new Map<number, Map<number, ResultState>>();
-
-    for (const candidate of candidates) {
-      if (isWeakRadarrOnlyMatch(candidate)) {
-        continue;
-      }
-
-      const comedianCandidates = grouped.get(candidate.comedianId) ?? new Map<number, ResultState>();
-      const existingState = comedianCandidates.get(candidate.tmdbMovieId) ?? 'none';
-      const radarrMovie =
-        (candidate.radarrMovieId == null ? null : monitoredMovieByRadarrId.get(candidate.radarrMovieId)) ??
-        monitoredMovieByTmdbId.get(candidate.tmdbMovieId);
-      const nextState: ResultState = radarrMovie?.hasFile ? 'available' : radarrMovie ? 'monitored' : 'none';
-      const resultState = stateRank[nextState] > stateRank[existingState] ? nextState : existingState;
-
-      comedianCandidates.set(candidate.tmdbMovieId, resultState);
-      grouped.set(candidate.comedianId, comedianCandidates);
-    }
-
-    return new Map(
-      [...grouped.entries()].map(([comedianId, comedianCandidates]) => {
-        const states = [...comedianCandidates.values()];
-        const available = states.filter((state) => state === 'available').length;
-        return [
-          comedianId,
-          {
-            available,
-            monitored: states.filter((state) => state === 'monitored').length,
-            remaining: comedianCandidates.size - available,
-            total: comedianCandidates.size
-          }
-        ];
-      })
-    );
-  }, [candidates, monitoredMovieByRadarrId, monitoredMovieByTmdbId]);
   const comedianNewReviewCounts = useMemo(() => {
     const grouped = new Map<number, Set<number>>();
 
@@ -291,7 +262,9 @@ function App() {
       grouped.set(candidate.comedianId, comedianCandidates);
     }
 
-    return new Map([...grouped.entries()].map(([comedianId, comedianCandidates]) => [comedianId, comedianCandidates.size]));
+    return new Map(
+      [...grouped.entries()].map(([comedianId, comedianCandidates]) => [comedianId, comedianCandidates.size])
+    );
   }, [candidates, monitoredRadarrIds, monitoredTmdbIds]);
   const visibleMonitoredRows = useMemo(() => {
     if (!selectedComedianId) {
@@ -315,24 +288,19 @@ function App() {
       })
       .sort((first, second) => first.movie.title.localeCompare(second.movie.title));
   }, [candidates, monitoredMovieByRadarrId, monitoredMovieByTmdbId, selectedComedianId]);
-  const availableMonitoredRows = useMemo(() => visibleMonitoredRows.filter(({ movie }) => Boolean(movie.hasFile)), [visibleMonitoredRows]);
-  const pendingMonitoredRows = useMemo(() => visibleMonitoredRows.filter(({ movie }) => !movie.hasFile), [visibleMonitoredRows]);
-  const hasReviewCandidates = reviewCandidates.length > 0;
-  const hasMonitoredRows = visibleMonitoredRows.length > 0;
-  const hasNotMonitoredCandidates = ignoredNotMonitoredCandidates.length > 0;
-  const preferredDetailTab: DetailTab = hasReviewCandidates
-    ? 'review'
-    : hasMonitoredRows
-      ? 'monitored'
-      : hasNotMonitoredCandidates
-        ? 'notMonitored'
-        : 'monitored';
-  const activeDetailTab =
-    activeTab === 'review' && !hasReviewCandidates
-      ? preferredDetailTab
-      : activeTab === 'monitored' && !hasReviewCandidates && !hasMonitoredRows && hasNotMonitoredCandidates
-        ? 'notMonitored'
-        : activeTab;
+  const availableMonitoredRows = useMemo(
+    () => visibleMonitoredRows.filter(({ movie }) => Boolean(movie.hasFile)),
+    [visibleMonitoredRows]
+  );
+  const pendingMonitoredRows = useMemo(
+    () => visibleMonitoredRows.filter(({ movie }) => !movie.hasFile),
+    [visibleMonitoredRows]
+  );
+  const upcoming = useMemo(() => upcomingSpecials(candidates, today), [candidates, today]);
+  const filteredComedians = comedians.filter((comedian) =>
+    comedian.name.toLocaleLowerCase().includes(libraryFilter.toLocaleLowerCase())
+  );
+
   const persistedSetupComplete = persistedSettings ? isSetupComplete(persistedSettings) : false;
   const showingSettings = shouldShowSettings(initialDataLoaded, showSettingsPage, persistedSettings);
 
@@ -344,11 +312,15 @@ function App() {
     radarrSyncingRef.current = true;
     try {
       const [nextRadarrSync, nextCandidates] = await Promise.all([
-        api<RadarrSyncResult>('/api/radarr/sync', { method: 'POST' }).catch(() => ({ movies: [], updatedCandidates: [] })),
+        api<RadarrSyncResult>('/api/radarr/sync', { method: 'POST' }).catch(() => null),
         api<Candidate[]>('/api/candidates')
       ]);
-      setCandidates(nextCandidates);
-      setMonitoredMovies(nextRadarrSync.movies);
+      const synced = new Map(
+        nextRadarrSync?.updatedCandidates.map((candidate) => [candidate.id, candidate]) ?? []
+      );
+      setCandidates(nextCandidates.map((candidate) => synced.get(candidate.id) ?? candidate));
+      setRadarrUnavailable(nextRadarrSync === null);
+      if (nextRadarrSync) setMonitoredMovies(nextRadarrSync.movies);
     } finally {
       radarrSyncingRef.current = false;
     }
@@ -362,11 +334,16 @@ function App() {
     setSettings(nextSettings);
     setPersistedSettings(nextSettings);
     setComedians(nextComedians);
+    setSelectedComedianId((current) =>
+      nextComedians.some((comedian) => comedian.id === current) ? current : (nextComedians[0]?.id ?? null)
+    );
     await syncRadarrState();
     return nextSettings;
   }
 
   async function run<T>(label: string, task: () => Promise<T>, success?: (result: T) => string) {
+    if (runningRef.current) return;
+    runningRef.current = true;
     setBusy(label);
     setError(null);
     setNotice(null);
@@ -377,10 +354,52 @@ function App() {
       }
       await load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : _t('error.generic'));
+      if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
+        setError(caught instanceof Error ? caught.message : _t('error.generic'));
+      }
     } finally {
       setBusy(null);
+      runningRef.current = false;
     }
+  }
+
+  useEffect(() => {
+    const updateDay = () => setToday(localCalendarDate());
+    let midnight: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      updateDay();
+      const now = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      clearTimeout(midnight);
+      midnight = setTimeout(schedule, next.getTime() - now.getTime() + 50);
+    };
+    schedule();
+    window.addEventListener('focus', schedule);
+    document.addEventListener('visibilitychange', schedule);
+    return () => {
+      clearTimeout(midnight);
+      window.removeEventListener('focus', schedule);
+      document.removeEventListener('visibilitychange', schedule);
+    };
+  }, []);
+
+  useEffect(() => {
+    const dialog = addDialogRef.current;
+    if (!dialog) return;
+    if (showAddComedian && !dialog.open) {
+      dialog.showModal();
+      dialog.querySelector('input')?.focus();
+    }
+    if (!showAddComedian && dialog.open) dialog.close();
+  }, [showAddComedian]);
+
+  function openAddComedian() {
+    searchControllerRef.current?.abort();
+    setName('');
+    setPersonMatches([]);
+    setError(null);
+    setNotice(null);
+    setShowAddComedian(true);
   }
 
   useEffect(() => {
@@ -414,7 +433,7 @@ function App() {
     }
 
     const intervalId = window.setInterval(() => {
-      void syncRadarrState();
+      void syncRadarrState().catch(() => setRadarrUnavailable(true));
     }, radarrSyncIntervalMs);
 
     return () => window.clearInterval(intervalId);
@@ -424,7 +443,8 @@ function App() {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
     function applyTheme() {
-      document.documentElement.dataset.theme = theme === 'system' ? (mediaQuery.matches ? 'dark' : 'light') : theme;
+      document.documentElement.dataset.theme =
+        theme === 'system' ? (mediaQuery.matches ? 'dark' : 'light') : theme;
       document.documentElement.style.colorScheme = theme === 'system' ? 'light dark' : theme;
     }
 
@@ -438,21 +458,16 @@ function App() {
       return;
     }
 
-    const timeout = window.setTimeout(() => {
-      setNotice(null);
-      setError(null);
-    }, error ? 7000 : 4500);
+    const timeout = window.setTimeout(
+      () => {
+        setNotice(null);
+        setError(null);
+      },
+      error ? 7000 : 4500
+    );
 
     return () => window.clearTimeout(timeout);
   }, [error, notice]);
-
-  useEffect(() => {
-    if (selectedComedianId == null) {
-      return;
-    }
-
-    setActiveTab(preferredDetailTab);
-  }, [preferredDetailTab, selectedComedianId]);
 
   async function persistSettings(
     nextSettings: AppSettings,
@@ -494,7 +509,9 @@ function App() {
     try {
       const response = await fetch('/api/backup');
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({ error: response.statusText }))) as { error?: string };
+        const body = (await response.json().catch(() => ({ error: response.statusText }))) as {
+          error?: string;
+        };
         throw new Error(body.error ?? response.statusText);
       }
 
@@ -552,10 +569,7 @@ function App() {
     }
   }
 
-  async function testRadarrConnection(
-    settingsToTest = settings,
-    options: { quiet?: boolean } = {}
-  ) {
+  async function testRadarrConnection(settingsToTest = settings, options: { quiet?: boolean } = {}) {
     if (!settingsToTest.radarrUrl.trim() || !settingsToTest.radarrApiKey.trim()) {
       return;
     }
@@ -618,10 +632,17 @@ function App() {
     const nextName = name.trim();
     if (!nextName) return;
 
+    searchControllerRef.current?.abort();
+    const controller = new AbortController();
+    searchControllerRef.current = controller;
     await run(
       'search-comedian',
-      () => api<PersonSearchResult[]>(`/api/comedians/search?q=${encodeURIComponent(nextName)}`),
+      () =>
+        api<PersonSearchResult[]>(`/api/comedians/search?q=${encodeURIComponent(nextName)}`, {
+          signal: controller.signal
+        }),
       (matches) => {
+        if (controller.signal.aborted) return '';
         setPersonMatches(matches);
         return matches.length === 0
           ? _t('notice.noPeopleFound', { name: nextName })
@@ -653,6 +674,8 @@ function App() {
       });
 
       setNotice(_t('notice.addedComedian', { name: comedian.name }));
+      setShowAddComedian(false);
+      setLibraryView('comedians');
       setSelectedComedianId(comedian.id);
       setActiveTab('review');
       setDetailOpen(true);
@@ -692,7 +715,7 @@ function App() {
   }
 
   return (
-    <main className="shell">
+    <main className={`shell${detailOpen ? ' isDetail' : ''}${showingSettings ? ' isSettings' : ''}`}>
       <header className="topbar">
         <div>
           <h1 className="brandTitle">
@@ -701,27 +724,71 @@ function App() {
           </h1>
           <p className="eyebrow brandSubtitle">{_t('app.subtitle')}</p>
         </div>
-        <div className="topbarActions">
-          {!initialDataLoaded ? null : showingSettings ? (
-            persistedSetupComplete && (
-              <button type="button" aria-label={_t('nav.openLibrary')} title={_t('nav.openLibrary')} onClick={() => setShowSettingsPage(false)}>
-                <Film size={16} aria-hidden="true" />
-                <span className="actionLabel">{_t('nav.library')}</span>
-              </button>
-            )
-          ) : (
-            <button type="button" aria-label={_t('nav.openSettings')} title={_t('nav.openSettings')} onClick={() => setShowSettingsPage(true)}>
-              <Settings size={16} aria-hidden="true" />
-              <span className="actionLabel">{_t('nav.settings')}</span>
+        {initialDataLoaded && persistedSetupComplete && (
+          <nav className="appNav" aria-label={_t('nav.library')}>
+            <button
+              type="button"
+              className={!showingSettings && libraryView === 'comedians' ? 'navItem selected' : 'navItem'}
+              aria-current={!showingSettings && libraryView === 'comedians' ? 'page' : undefined}
+              onClick={() => {
+                setShowSettingsPage(false);
+                setLibraryView('comedians');
+                setDetailOpen(false);
+              }}
+            >
+              <Library size={19} aria-hidden="true" />
+              <span>{_t('nav.library')}</span>
             </button>
-          )}
-        </div>
+            <button
+              type="button"
+              className={!showingSettings && libraryView === 'upcoming' ? 'navItem selected' : 'navItem'}
+              aria-current={!showingSettings && libraryView === 'upcoming' ? 'page' : undefined}
+              onClick={() => {
+                setShowSettingsPage(false);
+                setLibraryView('upcoming');
+                setDetailOpen(true);
+              }}
+            >
+              <CalendarDays size={19} aria-hidden="true" />
+              <span>{_t('nav.upcoming')}</span>
+              {upcoming.length > 0 && <span className="navCount">{upcoming.length}</span>}
+            </button>
+            <button
+              type="button"
+              className={showingSettings ? 'navItem selected' : 'navItem'}
+              aria-current={showingSettings ? 'page' : undefined}
+              onClick={() => setShowSettingsPage(true)}
+            >
+              <Settings size={19} aria-hidden="true" />
+              <span>{_t('nav.settings')}</span>
+            </button>
+          </nav>
+        )}
+        {!showingSettings && initialDataLoaded && (
+          <button
+            type="button"
+            className="headerAdd iconButton"
+            aria-label={_t('comedians.addNew')}
+            onClick={openAddComedian}
+          >
+            <Plus size={23} aria-hidden="true" />
+          </button>
+        )}
       </header>
 
       {(notice || error) && (
-        <div className={error ? 'toast error' : 'toast'} role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'}>
+        <div
+          className={error ? 'toast error' : 'toast'}
+          role={error ? 'alert' : 'status'}
+          aria-live={error ? 'assertive' : 'polite'}
+        >
           <span>{error ?? notice}</span>
-          <button type="button" aria-label={_t('toast.dismiss')} title={_t('toast.dismiss')} onClick={() => (error ? setError(null) : setNotice(null))}>
+          <button
+            type="button"
+            aria-label={_t('toast.dismiss')}
+            title={_t('toast.dismiss')}
+            onClick={() => (error ? setError(null) : setNotice(null))}
+          >
             <X size={16} aria-hidden="true" />
           </button>
         </div>
@@ -763,6 +830,11 @@ function App() {
         </section>
       )}
 
+      {radarrUnavailable && !showingSettings && (
+        <p className="connectionWarning" role="status">
+          {_t('radarr.statusUnavailable')}
+        </p>
+      )}
       <section className={showingSettings ? 'workspace settingsWorkspace' : 'workspace libraryWorkspace'}>
         {!initialDataLoaded && (
           <div className="panel loadingPanel" role="status" aria-live="polite">
@@ -771,805 +843,809 @@ function App() {
           </div>
         )}
         {showingSettings && (
-        <aside className="settingsPanel">
-          <div className="panelHeader">
-            <Settings size={18} aria-hidden="true" />
-            <h2>{_t('settings.title')}</h2>
-          </div>
-          <form className="settingsGrid" onSubmit={saveSettings}>
-            <fieldset className="settingsCard">
-              <legend>{_t('settings.group.language')}</legend>
-              <label>
-                {_t('settings.language')}
-                <select
-                  aria-label={_t('settings.language')}
-                  aria-describedby="settings-language-help"
-                  title={_t('settings.language')}
-                  value={normaliseLanguage(settings.language)}
-                  onChange={(event) => {
-                    const nextSettings = { ...settings, language: normaliseLanguage(event.target.value) };
-                    setSettings(nextSettings);
-                    void persistSettings(nextSettings, { closeWhenSetupComplete: false, notify: false });
-                  }}
-                >
-                  {supportedLanguages.map((language) => (
-                    <option key={language.code} value={language.code}>
-                      {language.label}
-                    </option>
-                  ))}
-                </select>
-                <span id="settings-language-help" className="settingsFieldHelp">{_t('settings.help.language')}</span>
-              </label>
-            </fieldset>
-
-            <fieldset className="settingsCard">
-              <legend>{_t('settings.group.appearance')}</legend>
-              <label>
-                {_t('settings.theme')}
-                <select
-                  aria-label={_t('settings.theme')}
-                  aria-describedby="settings-theme-help"
-                  title={_t('settings.theme')}
-                  value={theme}
-                  onChange={(event) => {
-                    const nextSettings = { ...settings, theme: event.target.value };
-                    setSettings(nextSettings);
-                    void persistSettings(nextSettings, { closeWhenSetupComplete: false, notify: false });
-                  }}
-                >
-                  <option value="system">{_t('settings.theme.system')}</option>
-                  <option value="light">{_t('settings.theme.light')}</option>
-                  <option value="dark">{_t('settings.theme.dark')}</option>
-                </select>
-                <span id="settings-theme-help" className="settingsFieldHelp">{_t('settings.help.theme')}</span>
-              </label>
-            </fieldset>
-
-            <fieldset className="settingsCard">
-              <legend>{_t('settings.group.tmdb')}</legend>
-              <p className="settingsCardHelp">{_t('settings.group.tmdbHelp')}</p>
-              <label>
-                {_t('settings.metadataSource')}
-                <select
-                  aria-label={_t('settings.metadataSource')}
-                  aria-describedby="settings-metadata-source-help"
-                  title={_t('settings.metadataSource')}
-                  value={settings.metadataSource === 'tmdb' ? 'tmdb' : 'service'}
-                  onChange={(event) => setSettings({ ...settings, metadataSource: event.target.value })}
-                >
-                  <option value="service">{_t('settings.metadataSource.service')}</option>
-                  <option value="tmdb">{_t('settings.metadataSource.tmdb')}</option>
-                </select>
-                <span id="settings-metadata-source-help" className="settingsFieldHelp">{_t('settings.help.metadataSource')}</span>
-              </label>
-              {settings.metadataSource === 'tmdb' ? (
+          <aside className="settingsPanel">
+            <div className="panelHeader">
+              <Settings size={18} aria-hidden="true" />
+              <h2>{_t('settings.title')}</h2>
+            </div>
+            <form className="settingsGrid" onSubmit={saveSettings}>
+              <fieldset className="settingsCard">
+                <legend>{_t('settings.group.language')}</legend>
                 <label>
-                  {_t('settings.tmdbToken')}
-                  <input
-                    aria-label={_t('settings.tmdbToken')}
-                    aria-describedby="settings-tmdb-token-help"
-                    title={_t('settings.tmdbToken')}
-                    type="password"
-                    value={settings.tmdbBearerToken}
-                    onChange={(event) => setSettings({ ...settings, tmdbBearerToken: event.target.value })}
-                  />
-                  <span id="settings-tmdb-token-help" className="settingsFieldHelp">{_t('settings.help.tmdbToken')}</span>
+                  {_t('settings.language')}
+                  <select
+                    aria-label={_t('settings.language')}
+                    aria-describedby="settings-language-help"
+                    title={_t('settings.language')}
+                    value={normaliseLanguage(settings.language)}
+                    onChange={(event) => {
+                      const nextSettings = { ...settings, language: normaliseLanguage(event.target.value) };
+                      setSettings(nextSettings);
+                      void persistSettings(nextSettings, { closeWhenSetupComplete: false, notify: false });
+                    }}
+                  >
+                    {supportedLanguages.map((language) => (
+                      <option key={language.code} value={language.code}>
+                        {language.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span id="settings-language-help" className="settingsFieldHelp">
+                    {_t('settings.help.language')}
+                  </span>
                 </label>
-              ) : (
-                null
-              )}
-              <div className="settingsCardActions">
-                <button className="secondary" type="submit" disabled={busy === 'settings'} title={_t('settings.save')}>
-                  <Save size={16} aria-hidden="true" />
-                  {_t('settings.save')}
-                </button>
-              </div>
-            </fieldset>
+              </fieldset>
 
-            <fieldset className="settingsCard">
-              <legend>{_t('settings.group.radarr')}</legend>
-              <p className="settingsCardHelp">{_t('settings.group.radarrHelp')}</p>
-              <label>
-                {_t('settings.radarrUrl')}
-                <input
-                  aria-label={_t('settings.radarrUrl')}
-                  aria-describedby="settings-radarr-url-help"
-                  title={_t('settings.radarrUrl')}
-                  value={settings.radarrUrl}
-                  onChange={(event) => updateRadarrConnectionSetting({ radarrUrl: event.target.value })}
-                />
-                <span id="settings-radarr-url-help" className="settingsFieldHelp">{_t('settings.help.radarrUrl')}</span>
-              </label>
-              <label>
-                {_t('settings.radarrApiKey')}
-                <input
-                  aria-label={_t('settings.radarrApiKey')}
-                  aria-describedby="settings-radarr-api-key-help"
-                  title={_t('settings.radarrApiKey')}
-                  type="password"
-                  value={settings.radarrApiKey}
-                  onChange={(event) => updateRadarrConnectionSetting({ radarrApiKey: event.target.value })}
-                />
-                <span id="settings-radarr-api-key-help" className="settingsFieldHelp">{_t('settings.help.radarrApiKey')}</span>
-              </label>
-              {!radarrOptions.connected && (
-                <button
-                  type="button"
-                  aria-label={_t('settings.testRadarrConnection')}
-                  title={_t('settings.testRadarrConnection')}
-                  disabled={
-                    busy === 'radarr-test' ||
-                    radarrChecking ||
-                    !settings.radarrUrl.trim() ||
-                    !settings.radarrApiKey.trim()
-                  }
-                  onClick={() => testRadarrConnection()}
-                >
-                  <Radar size={16} aria-hidden="true" />
-                  {_t('settings.testConnection')}
-                </button>
-              )}
-              <div className={radarrOptions.connected ? 'connectionStatus connected' : 'connectionStatus'} role="status" aria-live="polite">
-                {radarrOptions.connected && _t('settings.radarrConnected')}
-                {!radarrOptions.connected && radarrChecking && _t('settings.checkingRadarr')}
-                {!radarrOptions.connected &&
-                  !radarrChecking &&
-                  (radarrOptions.error ??
-                    (radarrChecked
-                      ? _t('settings.testToChoose')
-                      : _t('settings.enterToTest')))}
-              </div>
-              {radarrOptions.connected && (
-                <>
+              <fieldset className="settingsCard">
+                <legend>{_t('settings.group.appearance')}</legend>
+                <label>
+                  {_t('settings.theme')}
+                  <select
+                    aria-label={_t('settings.theme')}
+                    aria-describedby="settings-theme-help"
+                    title={_t('settings.theme')}
+                    value={theme}
+                    onChange={(event) => {
+                      const nextSettings = { ...settings, theme: event.target.value };
+                      setSettings(nextSettings);
+                      void persistSettings(nextSettings, { closeWhenSetupComplete: false, notify: false });
+                    }}
+                  >
+                    <option value="system">{_t('settings.theme.system')}</option>
+                    <option value="light">{_t('settings.theme.light')}</option>
+                    <option value="dark">{_t('settings.theme.dark')}</option>
+                  </select>
+                  <span id="settings-theme-help" className="settingsFieldHelp">
+                    {_t('settings.help.theme')}
+                  </span>
+                </label>
+              </fieldset>
+
+              <fieldset className="settingsCard">
+                <legend>{_t('settings.group.tmdb')}</legend>
+                <p className="settingsCardHelp">{_t('settings.group.tmdbHelp')}</p>
+                <label>
+                  {_t('settings.metadataSource')}
+                  <select
+                    aria-label={_t('settings.metadataSource')}
+                    aria-describedby="settings-metadata-source-help"
+                    title={_t('settings.metadataSource')}
+                    value={settings.metadataSource === 'tmdb' ? 'tmdb' : 'service'}
+                    onChange={(event) => setSettings({ ...settings, metadataSource: event.target.value })}
+                  >
+                    <option value="service">{_t('settings.metadataSource.service')}</option>
+                    <option value="tmdb">{_t('settings.metadataSource.tmdb')}</option>
+                  </select>
+                  <span id="settings-metadata-source-help" className="settingsFieldHelp">
+                    {_t('settings.help.metadataSource')}
+                  </span>
+                </label>
+                {settings.metadataSource === 'tmdb' ? (
                   <label>
-                    {_t('settings.qualityProfile')}
-                    <select
-                      aria-label={_t('settings.qualityProfile')}
-                      aria-describedby="settings-quality-profile-help"
-                      title={_t('settings.qualityProfile')}
-                      value={settings.radarrQualityProfileId}
-                      onChange={(event) => setSettings({ ...settings, radarrQualityProfileId: event.target.value })}
-                    >
-                      <option value="">{_t('settings.chooseQualityProfile')}</option>
-                      {radarrOptions.qualityProfiles.map((profile) => (
-                        <option key={profile.id} value={String(profile.id)}>
-                          {profile.name}
-                        </option>
-                      ))}
-                    </select>
-                    <span id="settings-quality-profile-help" className="settingsFieldHelp">{_t('settings.help.qualityProfile')}</span>
+                    {_t('settings.tmdbToken')}
+                    <input
+                      aria-label={_t('settings.tmdbToken')}
+                      aria-describedby="settings-tmdb-token-help"
+                      title={_t('settings.tmdbToken')}
+                      type="password"
+                      value={settings.tmdbBearerToken}
+                      onChange={(event) => setSettings({ ...settings, tmdbBearerToken: event.target.value })}
+                    />
+                    <span id="settings-tmdb-token-help" className="settingsFieldHelp">
+                      {_t('settings.help.tmdbToken')}
+                    </span>
                   </label>
-                  <label>
-                    {_t('settings.rootFolder')}
-                    <select
-                      aria-label={_t('settings.rootFolder')}
-                      aria-describedby="settings-root-folder-help"
-                      title={_t('settings.rootFolder')}
-                      value={settings.radarrRootFolderPath}
-                      onChange={(event) => setSettings({ ...settings, radarrRootFolderPath: event.target.value })}
-                    >
-                      <option value="">{_t('settings.chooseRootFolder')}</option>
-                      {radarrOptions.rootFolders.map((folder) => (
-                        <option key={folder.path} value={folder.path}>
-                          {folder.path}
-                        </option>
-                      ))}
-                    </select>
-                    <span id="settings-root-folder-help" className="settingsFieldHelp">{_t('settings.help.rootFolder')}</span>
-                  </label>
-                </>
-              )}
-              <label>
-                {_t('settings.minimumAvailability')}
-                <select
-                  aria-label={_t('settings.minimumAvailability')}
-                  aria-describedby="settings-minimum-availability-help"
-                  title={_t('settings.minimumAvailability')}
-                  value={settings.radarrMinimumAvailability}
-                  onChange={(event) => setSettings({ ...settings, radarrMinimumAvailability: event.target.value })}
-                >
-                  <option value="announced">{_t('settings.availability.announced')}</option>
-                  <option value="inCinemas">{_t('settings.availability.inCinemas')}</option>
-                  <option value="released">{_t('settings.availability.released')}</option>
-                </select>
-                <span id="settings-minimum-availability-help" className="settingsFieldHelp">{_t('settings.help.minimumAvailability')}</span>
-              </label>
-              <div className="settingsCardActions">
-                <button className="secondary" type="submit" disabled={busy === 'settings'} title={_t('settings.save')}>
-                  <Save size={16} aria-hidden="true" />
-                  {_t('settings.save')}
-                </button>
-              </div>
-            </fieldset>
+                ) : null}
+                <div className="settingsCardActions">
+                  <button
+                    className="secondary"
+                    type="submit"
+                    disabled={busy === 'settings'}
+                    title={_t('settings.save')}
+                  >
+                    <Save size={16} aria-hidden="true" />
+                    {_t('settings.save')}
+                  </button>
+                </div>
+              </fieldset>
 
-            <fieldset className="settingsCard">
-              <legend>{_t('settings.group.automation')}</legend>
-              <p className="settingsCardHelp">{_t('settings.group.automationHelp')}</p>
-              <label>
-                {_t('settings.autoAddAbove')}
+              <fieldset className="settingsCard">
+                <legend>{_t('settings.group.radarr')}</legend>
+                <p className="settingsCardHelp">{_t('settings.group.radarrHelp')}</p>
+                <label>
+                  {_t('settings.radarrUrl')}
+                  <input
+                    aria-label={_t('settings.radarrUrl')}
+                    aria-describedby="settings-radarr-url-help"
+                    title={_t('settings.radarrUrl')}
+                    value={settings.radarrUrl}
+                    onChange={(event) => updateRadarrConnectionSetting({ radarrUrl: event.target.value })}
+                  />
+                  <span id="settings-radarr-url-help" className="settingsFieldHelp">
+                    {_t('settings.help.radarrUrl')}
+                  </span>
+                </label>
+                <label>
+                  {_t('settings.radarrApiKey')}
+                  <input
+                    aria-label={_t('settings.radarrApiKey')}
+                    aria-describedby="settings-radarr-api-key-help"
+                    title={_t('settings.radarrApiKey')}
+                    type="password"
+                    value={settings.radarrApiKey}
+                    onChange={(event) => updateRadarrConnectionSetting({ radarrApiKey: event.target.value })}
+                  />
+                  <span id="settings-radarr-api-key-help" className="settingsFieldHelp">
+                    {_t('settings.help.radarrApiKey')}
+                  </span>
+                </label>
+                {!radarrOptions.connected && (
+                  <button
+                    type="button"
+                    aria-label={_t('settings.testRadarrConnection')}
+                    title={_t('settings.testRadarrConnection')}
+                    disabled={
+                      busy === 'radarr-test' ||
+                      radarrChecking ||
+                      !settings.radarrUrl.trim() ||
+                      !settings.radarrApiKey.trim()
+                    }
+                    onClick={() => testRadarrConnection()}
+                  >
+                    <Radar size={16} aria-hidden="true" />
+                    {_t('settings.testConnection')}
+                  </button>
+                )}
+                <div
+                  className={radarrOptions.connected ? 'connectionStatus connected' : 'connectionStatus'}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {radarrOptions.connected && _t('settings.radarrConnected')}
+                  {!radarrOptions.connected && radarrChecking && _t('settings.checkingRadarr')}
+                  {!radarrOptions.connected &&
+                    !radarrChecking &&
+                    (radarrOptions.error ??
+                      (radarrChecked ? _t('settings.testToChoose') : _t('settings.enterToTest')))}
+                </div>
+                {radarrOptions.connected && (
+                  <>
+                    <label>
+                      {_t('settings.qualityProfile')}
+                      <select
+                        aria-label={_t('settings.qualityProfile')}
+                        aria-describedby="settings-quality-profile-help"
+                        title={_t('settings.qualityProfile')}
+                        value={settings.radarrQualityProfileId}
+                        onChange={(event) =>
+                          setSettings({ ...settings, radarrQualityProfileId: event.target.value })
+                        }
+                      >
+                        <option value="">{_t('settings.chooseQualityProfile')}</option>
+                        {radarrOptions.qualityProfiles.map((profile) => (
+                          <option key={profile.id} value={String(profile.id)}>
+                            {profile.name}
+                          </option>
+                        ))}
+                      </select>
+                      <span id="settings-quality-profile-help" className="settingsFieldHelp">
+                        {_t('settings.help.qualityProfile')}
+                      </span>
+                    </label>
+                    <label>
+                      {_t('settings.rootFolder')}
+                      <select
+                        aria-label={_t('settings.rootFolder')}
+                        aria-describedby="settings-root-folder-help"
+                        title={_t('settings.rootFolder')}
+                        value={settings.radarrRootFolderPath}
+                        onChange={(event) =>
+                          setSettings({ ...settings, radarrRootFolderPath: event.target.value })
+                        }
+                      >
+                        <option value="">{_t('settings.chooseRootFolder')}</option>
+                        {radarrOptions.rootFolders.map((folder) => (
+                          <option key={folder.path} value={folder.path}>
+                            {folder.path}
+                          </option>
+                        ))}
+                      </select>
+                      <span id="settings-root-folder-help" className="settingsFieldHelp">
+                        {_t('settings.help.rootFolder')}
+                      </span>
+                    </label>
+                  </>
+                )}
+                <label>
+                  {_t('settings.minimumAvailability')}
+                  <select
+                    aria-label={_t('settings.minimumAvailability')}
+                    aria-describedby="settings-minimum-availability-help"
+                    title={_t('settings.minimumAvailability')}
+                    value={settings.radarrMinimumAvailability}
+                    onChange={(event) =>
+                      setSettings({ ...settings, radarrMinimumAvailability: event.target.value })
+                    }
+                  >
+                    <option value="announced">{_t('settings.availability.announced')}</option>
+                    <option value="inCinemas">{_t('settings.availability.inCinemas')}</option>
+                    <option value="released">{_t('settings.availability.released')}</option>
+                  </select>
+                  <span id="settings-minimum-availability-help" className="settingsFieldHelp">
+                    {_t('settings.help.minimumAvailability')}
+                  </span>
+                </label>
+                <div className="settingsCardActions">
+                  <button
+                    className="secondary"
+                    type="submit"
+                    disabled={busy === 'settings'}
+                    title={_t('settings.save')}
+                  >
+                    <Save size={16} aria-hidden="true" />
+                    {_t('settings.save')}
+                  </button>
+                </div>
+              </fieldset>
+
+              <fieldset className="settingsCard">
+                <legend>{_t('settings.group.automation')}</legend>
+                <p className="settingsCardHelp">{_t('settings.group.automationHelp')}</p>
+                <label>
+                  {_t('settings.autoAddAbove')}
+                  <input
+                    aria-label={_t('settings.autoAddAbove')}
+                    aria-describedby="settings-auto-add-help"
+                    title={_t('settings.autoAddAbove')}
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={settings.autoAddConfidenceThreshold}
+                    onChange={(event) =>
+                      setSettings({ ...settings, autoAddConfidenceThreshold: event.target.value })
+                    }
+                  />
+                  <span id="settings-auto-add-help" className="settingsFieldHelp">
+                    {_t('settings.help.autoAddAbove')}
+                  </span>
+                </label>
+                <label>
+                  {_t('settings.autoIgnoreBelow')}
+                  <input
+                    aria-label={_t('settings.autoIgnoreBelow')}
+                    aria-describedby="settings-auto-ignore-help"
+                    title={_t('settings.autoIgnoreBelow')}
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={settings.hideBelowConfidenceThreshold}
+                    onChange={(event) =>
+                      setSettings({ ...settings, hideBelowConfidenceThreshold: event.target.value })
+                    }
+                  />
+                  <span id="settings-auto-ignore-help" className="settingsFieldHelp">
+                    {_t('settings.help.autoIgnoreBelow')}
+                  </span>
+                </label>
+                <div className="settingsCardActions">
+                  <button
+                    className="secondary"
+                    type="submit"
+                    disabled={busy === 'settings'}
+                    title={_t('settings.save')}
+                  >
+                    <Save size={16} aria-hidden="true" />
+                    {_t('settings.save')}
+                  </button>
+                </div>
+              </fieldset>
+
+              <fieldset className="settingsCard">
+                <legend>{_t('settings.group.backupRestore')}</legend>
+                <p className="settingsCardHelp">{_t('settings.group.backupRestoreHelp')}</p>
+                <p className="settingsHint">{_t('settings.backupPrivacy')}</p>
+                <div className="backupActions">
+                  <button
+                    type="button"
+                    disabled={busy === 'backup' || busy === 'restore'}
+                    aria-label={_t('settings.downloadBackup')}
+                    title={_t('settings.downloadBackup')}
+                    onClick={() => void downloadBackup()}
+                  >
+                    {busy === 'backup' ? (
+                      <RefreshCcw className="spin" size={16} aria-hidden="true" />
+                    ) : (
+                      <Download size={16} aria-hidden="true" />
+                    )}
+                    {_t('settings.downloadBackup')}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy === 'backup' || busy === 'restore'}
+                    aria-label={_t('settings.restoreBackup')}
+                    title={_t('settings.restoreBackup')}
+                    onClick={() => backupInputRef.current?.click()}
+                  >
+                    {busy === 'restore' ? (
+                      <RefreshCcw className="spin" size={16} aria-hidden="true" />
+                    ) : (
+                      <Upload size={16} aria-hidden="true" />
+                    )}
+                    {_t('settings.restoreBackup')}
+                  </button>
+                </div>
                 <input
-                  aria-label={_t('settings.autoAddAbove')}
-                  aria-describedby="settings-auto-add-help"
-                  title={_t('settings.autoAddAbove')}
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={settings.autoAddConfidenceThreshold}
-                  onChange={(event) => setSettings({ ...settings, autoAddConfidenceThreshold: event.target.value })}
+                  ref={backupInputRef}
+                  className="fileInputHidden"
+                  type="file"
+                  accept="application/json,.json"
+                  title={_t('settings.restoreBackupFile')}
+                  onChange={restoreBackupFromFile}
                 />
-                <span id="settings-auto-add-help" className="settingsFieldHelp">{_t('settings.help.autoAddAbove')}</span>
-              </label>
-              <label>
-                {_t('settings.autoIgnoreBelow')}
-                <input
-                  aria-label={_t('settings.autoIgnoreBelow')}
-                  aria-describedby="settings-auto-ignore-help"
-                  title={_t('settings.autoIgnoreBelow')}
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={settings.hideBelowConfidenceThreshold}
-                  onChange={(event) => setSettings({ ...settings, hideBelowConfidenceThreshold: event.target.value })}
-                />
-                <span id="settings-auto-ignore-help" className="settingsFieldHelp">{_t('settings.help.autoIgnoreBelow')}</span>
-              </label>
-              <div className="settingsCardActions">
-                <button className="secondary" type="submit" disabled={busy === 'settings'} title={_t('settings.save')}>
-                  <Save size={16} aria-hidden="true" />
-                  {_t('settings.save')}
-                </button>
-              </div>
-            </fieldset>
+              </fieldset>
 
-            <fieldset className="settingsCard">
-              <legend>{_t('settings.group.backupRestore')}</legend>
-              <p className="settingsCardHelp">{_t('settings.group.backupRestoreHelp')}</p>
-              <p className="settingsHint">{_t('settings.backupPrivacy')}</p>
-              <div className="backupActions">
-                <button
-                  type="button"
-                  disabled={busy === 'backup' || busy === 'restore'}
-                  aria-label={_t('settings.downloadBackup')}
-                  title={_t('settings.downloadBackup')}
-                  onClick={() => void downloadBackup()}
-                >
-                  {busy === 'backup' ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Download size={16} aria-hidden="true" />}
-                  {_t('settings.downloadBackup')}
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy === 'backup' || busy === 'restore'}
-                  aria-label={_t('settings.restoreBackup')}
-                  title={_t('settings.restoreBackup')}
-                  onClick={() => backupInputRef.current?.click()}
-                >
-                  {busy === 'restore' ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Upload size={16} aria-hidden="true" />}
-                  {_t('settings.restoreBackup')}
-                </button>
-              </div>
-              <input
-                ref={backupInputRef}
-                className="fileInputHidden"
-                type="file"
-                accept="application/json,.json"
-                title={_t('settings.restoreBackupFile')}
-                onChange={restoreBackupFromFile}
-              />
-            </fieldset>
-
-            <p className="tmdbAttribution">
-              {_t('settings.tmdbAttribution')}{' '}
-              <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">
-                {_t('settings.tmdbAttributionLink')}
-              </a>
-            </p>
-
-          </form>
-        </aside>
+              <p className="tmdbAttribution">
+                {_t('settings.tmdbAttribution')}{' '}
+                <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">
+                  {_t('settings.tmdbAttributionLink')}
+                </a>
+              </p>
+            </form>
+          </aside>
         )}
 
         {initialDataLoaded && !showingSettings && (
-        <section className={detailOpen ? 'mainColumn detailOpen' : 'mainColumn'}>
-          <div className="comedianPanel">
-            <div className="panelHeader">
-              <h2>{_t('comedians.title')}</h2>
-            </div>
-            <section className="librarySection">
-              <div className="listDivider">
-                <span>{_t('comedians.addNew')}</span>
+          <section className={detailOpen ? 'mainColumn detailOpen' : 'mainColumn'}>
+            <aside className="comedianPanel" aria-label={_t('nav.comedians')}>
+              <div className="libraryToolbar">
+                <label className="librarySearch">
+                  <Search size={16} aria-hidden="true" />
+                  <span className="srOnly">{_t('library.filter')}</span>
+                  <input
+                    placeholder={_t('library.filter')}
+                    value={libraryFilter}
+                    onChange={(event) => setLibraryFilter(event.target.value)}
+                  />
+                </label>
               </div>
-              <div className="libraryCard searchCard">
-                <form className="addComedianForm" onSubmit={addComedian}>
-                  <div className="addRow">
-                    <input
-                      id="comedian-search"
-                      aria-label={_t('comedians.searchLabel')}
-                      title={_t('comedians.searchLabel')}
-                      placeholder={_t('comedians.searchPlaceholder')}
-                      value={name}
-                      onChange={(event) => {
-                        setName(event.target.value);
-                        setPersonMatches([]);
-                      }}
-                    />
+              <div className="listDivider">
+                {_t('nav.comedians')}
+                <span>{comedians.length}</span>
+              </div>
+              <div className="comedianList groupedList">
+                {filteredComedians.map((comedian) => {
+                  const count = comedianNewReviewCounts.get(comedian.id) ?? 0;
+                  return (
                     <button
-                      className="primary"
-                      type="submit"
-                      disabled={busy === 'search-comedian'}
-                      aria-label={_t('comedians.search')}
-                      title={_t('comedians.search')}
+                      type="button"
+                      className="comedianSelect"
+                      key={comedian.id}
+                      aria-current={
+                        libraryView === 'comedians' && selectedComedianId === comedian.id ? 'true' : undefined
+                      }
+                      onClick={() => {
+                        setSelectedComedianId(comedian.id);
+                        setActiveTab('review');
+                        setLibraryView('comedians');
+                        setDetailOpen(true);
+                      }}
                     >
-                      <Search size={18} aria-hidden="true" />
-                      {_t('comedians.search')}
-                    </button>
-                  </div>
-                </form>
-                {personMatches.length > 0 && (
-                  <div className="personMatches">
-                    <div className="searchResultsHeader">
-                      <strong>{_t('comedians.searchResults')}</strong>
-                      <span>
-                        {_t(personMatches.length === 1 ? 'comedians.matchCount' : 'comedians.matchCount_plural', {
-                          count: personMatches.length
-                        })}
+                      <span className="avatar">
+                        {comedian.profilePath ? (
+                          <img src={`${imageBase}${comedian.profilePath}`} loading="lazy" alt="" />
+                        ) : (
+                          <span>{comedian.name.slice(0, 1)}</span>
+                        )}
                       </span>
-                    </div>
-                    {personMatches.map((match) => {
-                      const savedComedian = comedians.find((comedian) => comedian.tmdbPersonId === match.tmdbPersonId);
-                      const isSaved = Boolean(savedComedian);
-                      const buttonLabel = isSaved ? _t('comedians.show') : _t('comedians.select');
-                      const flag = countryFlag(match.countryCode);
-                      return (
-                        <article className="personMatch" key={match.tmdbPersonId}>
-                          <div className="avatar">
-                            {match.profilePath ? (
-                              <img src={`${imageBase}${match.profilePath}`} alt="" />
-                            ) : (
-                              <span>{match.name.slice(0, 1).toUpperCase()}</span>
-                            )}
-                          </div>
-                          <div>
-                            <div className="personMatchTitle">
-                              <strong className="personMatchName">{match.name}</strong>
-                              {match.matchReasons && match.matchReasons.length > 0 && (
-                                <span className="comedianSignal" title={match.matchReasons.join(', ')}>
-                                  {_t('comedians.likelyComedian')}
-                                </span>
-                              )}
-                              {flag && (
-                                <span
-                                  className="originFlag"
-                                  title={match.countryName ?? match.placeOfBirth ?? undefined}
-                                  aria-label={match.countryName ? _t('comedians.country', { country: match.countryName }) : undefined}
-                                >
-                                  {flag}
-                                </span>
-                              )}
-                            </div>
-                            <span className="personMatchKnownFor">
-                              {match.knownFor.length > 0 ? match.knownFor.join(' · ') : `TMDB ${match.tmdbPersonId}`}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className={isSaved ? 'secondary' : 'primary'}
-                            aria-label={`${buttonLabel} ${match.name}`}
-                            title={`${buttonLabel} ${match.name}`}
-                            disabled={!isSaved && (busy === 'add-comedian' || addingPersonId !== null)}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              if (savedComedian) {
-                                setSelectedComedianId(savedComedian.id);
-                                setActiveTab('review');
-                                setDetailOpen(true);
-                                setName('');
-                                setPersonMatches([]);
-                                return;
-                              }
-                              addComedianMatch(match);
-                            }}
-                          >
-                            {addingPersonId === match.tmdbPersonId ? (
-                              <RefreshCcw className="spin" size={16} aria-hidden="true" />
-                            ) : isSaved ? (
-                              <Eye size={16} aria-hidden="true" />
-                            ) : (
-                              <Plus size={16} aria-hidden="true" />
-                            )}
-                            {addingPersonId === match.tmdbPersonId ? _t('comedians.adding') : buttonLabel}
-                          </button>
-                        </article>
-                      );
-                    })}
-                  </div>
+                      <span className="comedianCopy">
+                        <strong>{comedian.name}</strong>
+                        <span>
+                          {busy === `scan-${comedian.id}`
+                            ? _t('comedians.scanningBadge')
+                            : count
+                              ? _t('library.reviewCount', { count })
+                              : _t('library.upToDate')}
+                        </span>
+                      </span>
+                      {count > 0 && <span className="reviewCount">{count}</span>}
+                      <ChevronRight size={15} className="rowChevron" aria-hidden="true" />
+                    </button>
+                  );
+                })}
+                {comedians.length === 0 && <p className="empty">{_t('comedians.empty')}</p>}
+                {comedians.length > 0 && filteredComedians.length === 0 && (
+                  <p className="empty">{_t('library.emptyFilter')}</p>
                 )}
               </div>
-            </section>
-            <section className="librarySection savedLibrarySection">
-              <div className="listDivider">
-                <span>{_t('comedians.savedWithCount', { count: comedians.length })}</span>
-              </div>
-              <div className="libraryCard savedComediansCard">
-                <div className="comedianList">
-                  {comedians.map((comedian) => {
-                    const isScanning = busy === `scan-${comedian.id}`;
-                    const selected = selectedComedianId === comedian.id;
-                    const resultCount = comedianResultCounts.get(comedian.id) ?? { available: 0, monitored: 0, remaining: 0, total: 0 };
-                    const newReviewCount = comedianNewReviewCounts.get(comedian.id) ?? 0;
-                    const flag = countryFlag(comedian.countryCode);
-                    const reviewSuffix =
-                      newReviewCount > 0
-                        ? _t('comedians.reviewSuffix', {
-                            count: newReviewCount,
-                            item: _t(newReviewCount === 1 ? 'comedians.candidateSingular' : 'comedians.candidatePlural')
-                          })
-                        : '';
-                    const selectComedian = () => {
-                      setSelectedComedianId(comedian.id);
-                      setActiveTab('review');
-                      setDetailOpen(true);
-                    };
+              <button type="button" className="addComedianButton" onClick={openAddComedian}>
+                <Plus size={17} aria-hidden="true" />
+                {_t('comedians.addNew')}
+              </button>
+              <p className="sidebarFootnote">{_t('detail.footer')}</p>
+            </aside>
 
-                    return (
-                      <article
-                        className={selected ? 'comedianItem selected' : 'comedianItem'}
-                        key={comedian.id}
-                      >
+            <section
+              className="detailPanel"
+              aria-label={
+                libraryView === 'upcoming'
+                  ? _t('upcoming.title')
+                  : (selectedComedian?.name ?? _t('detail.noSelectionTitle'))
+              }
+            >
+              {libraryView === 'upcoming' ? (
+                <>
+                  <button
+                    type="button"
+                    className="mobileBack textButton"
+                    onClick={() => {
+                      setDetailOpen(false);
+                      setLibraryView('comedians');
+                    }}
+                  >
+                    <ChevronLeft size={18} aria-hidden="true" />
+                    {_t('nav.comedians')}
+                  </button>
+                  <div className="detailHeading">
+                    <span className="eyebrow">{_t('library.title')}</span>
+                    <h2>{_t('upcoming.title')}</h2>
+                    <p>{_t('upcoming.help')}</p>
+                  </div>
+                  {upcoming.length === 0 ? (
+                    <div className="detailEmptyState">
+                      <CalendarDays size={35} aria-hidden="true" />
+                      <p>{_t('upcoming.empty')}</p>
+                    </div>
+                  ) : (
+                    <div className="groupedList">
+                      {upcoming.map((candidate) => {
+                        const movie = monitoredMovieByTmdbId.get(candidate.tmdbMovieId);
+                        return movie ? (
+                          <MonitoredMovieRow
+                            key={candidate.id}
+                            movie={movie}
+                            candidate={candidate}
+                            comedianName={candidate.comedianName}
+                            busy={busy}
+                            run={run}
+                            _t={_t}
+                          />
+                        ) : (
+                          <CandidateCard
+                            key={candidate.id}
+                            candidate={candidate}
+                            busy={busy}
+                            run={run}
+                            _t={_t}
+                            upcoming
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : !selectedComedian ? (
+                <div className="detailEmptyState">
+                  <Film size={42} aria-hidden="true" />
+                  <strong>{_t('detail.noSelectionTitle')}</strong>
+                  <span>{_t('detail.noSelectionHint')}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="detailToolbar">
+                    <button
+                      type="button"
+                      className="mobileBack textButton"
+                      onClick={() => setDetailOpen(false)}
+                    >
+                      <ChevronLeft size={18} aria-hidden="true" />
+                      {_t('nav.comedians')}
+                    </button>
+                    <details className="comedianMenu">
+                      <summary aria-label={_t('detail.more')}>
+                        <MoreHorizontal size={21} aria-hidden="true" />
+                      </summary>
+                      <div className="comedianMenuContent">
+                        {selectedComedian.tmdbPersonId && (
+                          <a
+                            href={`https://www.themoviedb.org/person/${selectedComedian.tmdbPersonId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {_t('detail.viewTmdb')}
+                            <ExternalLink size={14} aria-hidden="true" />
+                          </a>
+                        )}
+                        {selectedComedian.homepage && (
+                          <a href={selectedComedian.homepage} target="_blank" rel="noreferrer">
+                            {_t('detail.viewHomepage')}
+                            <ExternalLink size={14} aria-hidden="true" />
+                          </a>
+                        )}
                         <button
                           type="button"
-                          className="comedianSelect"
-                          aria-label={_t('comedians.openRow', {
-                            name: comedian.name,
-                            available: resultCount.available,
-                            monitored: resultCount.monitored,
-                            remaining: resultCount.remaining,
-                            reviewSuffix
-                          })}
-                          aria-pressed={selected}
-                          onClick={selectComedian}
+                          className="dangerText"
+                          disabled={Boolean(busy)}
+                          onClick={() => {
+                            if (
+                              !window.confirm(_t('comedians.deleteConfirm', { name: selectedComedian.name }))
+                            )
+                              return;
+                            void run(`delete-${selectedComedian.id}`, async () => {
+                              await api<void>(`/api/comedians/${selectedComedian.id}`, { method: 'DELETE' });
+                              setSelectedComedianId(null);
+                              setDetailOpen(false);
+                            });
+                          }}
                         >
-                          <span className="avatar">
-                            {comedian.profilePath ? (
-                              <img src={`${imageBase}${comedian.profilePath}`} alt="" />
-                            ) : (
-                              <span>{comedian.name.slice(0, 1).toUpperCase()}</span>
-                            )}
-                          </span>
-                          <span>
-                            <span className="comedianTitle">
-                              <strong>{comedian.name}</strong>
-                              {flag && (
-                                <span
-                                  className="originFlag"
-                                  title={comedian.countryName ?? comedian.placeOfBirth ?? undefined}
-                                  aria-label={comedian.countryName ? _t('comedians.country', { country: comedian.countryName }) : undefined}
-                                >
-                                  {flag}
-                                </span>
-                              )}
-                            </span>
-                            <span className="comedianMeta">
-                              {isScanning && <span className="scanBadge">{_t('comedians.scanningBadge')}</span>}
-                              {newReviewCount > 0 && (
-                                <span
-                                  className="newReviewBadge"
-                                  title={_t('comedians.newReviewTitle', {
-                                    count: newReviewCount,
-                                    item: _t(newReviewCount === 1 ? 'comedians.candidateSingular' : 'comedians.candidatePlural')
-                                  })}
-                                >
-                                  {_t('comedians.newBadge', { count: newReviewCount })}
-                                </span>
-                              )}
-                              <span
-                                className="resultCounter resultCounterFull"
-                                title={_t('comedians.resultCounterTitle', {
-                                  available: resultCount.available,
-                                  monitored: resultCount.monitored,
-                                  remaining: resultCount.remaining,
-                                  total: resultCount.total
-                                })}
-                              >
-                                {_t('comedians.resultCounter', {
-                                  available: resultCount.available,
-                                  monitored: resultCount.monitored,
-                                  remaining: resultCount.remaining
-                                })}
-                              </span>
-                              <span
-                                className="resultCounter resultCounterCompact"
-                                title={_t('comedians.resultCounterTitle', {
-                                  available: resultCount.available,
-                                  monitored: resultCount.monitored,
-                                  remaining: resultCount.remaining,
-                                  total: resultCount.total
-                                })}
-                              >
-                                {_t('comedians.resultCounterCompact', {
-                                  available: resultCount.available,
-                                  total: resultCount.total
-                                })}
-                              </span>
-                            </span>
-                          </span>
+                          <Trash2 size={14} aria-hidden="true" />
+                          {_t('comedians.delete', { name: selectedComedian.name })}
                         </button>
-                        <div className="rowActions">
-                          <button
-                            type="button"
-                            title={isScanning ? _t('comedians.scanning', { name: comedian.name }) : _t('comedians.scan', { name: comedian.name })}
-                            aria-label={isScanning ? _t('comedians.scanning', { name: comedian.name }) : _t('comedians.scan', { name: comedian.name })}
-                            disabled={isScanning || !comedian.tmdbPersonId}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              run(
-                                `scan-${comedian.id}`,
-                                () => api<ScanResult>(`/api/comedians/${comedian.id}/scan`, { method: 'POST' }),
-                                (result) => _t('notice.candidatesSaved', { name: result.comedian.name, count: result.saved })
-                              );
-                            }}
-                          >
-                            <RefreshCcw className={isScanning ? 'spin' : undefined} size={16} aria-hidden="true" />
-                          </button>
-                          <button
-                            type="button"
-                            title={_t('comedians.delete', { name: comedian.name })}
-                            aria-label={_t('comedians.delete', { name: comedian.name })}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              run(`delete-${comedian.id}`, () =>
-                                api<void>(`/api/comedians/${comedian.id}`, { method: 'DELETE' })
-                              );
-                            }}
-                          >
-                            <Trash2 size={16} aria-hidden="true" />
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                  {comedians.length === 0 && <p className="empty">{_t('comedians.empty')}</p>}
-                </div>
-              </div>
+                      </div>
+                    </details>
+                  </div>
+                  <div className="detailHeading personHeading">
+                    <span className="headingAvatar">
+                      {selectedComedian.profilePath ? (
+                        <img src={`${imageBase}${selectedComedian.profilePath}`} alt="" />
+                      ) : (
+                        <LaughMark />
+                      )}
+                    </span>
+                    <div>
+                      <h2>{selectedComedian.name}</h2>
+                      <p>
+                        {selectedComedianScanning
+                          ? _t('detail.scanning')
+                          : selectedComedian.lastScannedAt
+                            ? _t('detail.scanned', {
+                                date: new Date(
+                                  selectedComedian.lastScannedAt.replace(' ', 'T') +
+                                    (selectedComedian.lastScannedAt.includes('Z') ? '' : 'Z')
+                                ).toLocaleDateString(settings.language)
+                              })
+                            : _t('detail.notScanned')}
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    className="tabs"
+                    role="tablist"
+                    aria-label={_t('detail.resultCategories', { name: selectedComedian.name })}
+                    onKeyDown={(event) => {
+                      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+                      event.preventDefault();
+                      const order: DetailTab[] = ['review', 'monitored', 'notMonitored'];
+                      const index = order.indexOf(activeTab);
+                      const next =
+                        event.key === 'Home'
+                          ? 0
+                          : event.key === 'End'
+                            ? 2
+                            : (index + (event.key === 'ArrowRight' ? 1 : 2)) % 3;
+                      setActiveTab(order[next]);
+                      document.getElementById(`tab-${order[next]}`)?.focus();
+                    }}
+                  >
+                    {(['review', 'monitored', 'notMonitored'] as const).map((tab) => (
+                      <button
+                        type="button"
+                        role="tab"
+                        key={tab}
+                        id={`tab-${tab}`}
+                        aria-controls="specials-panel"
+                        aria-selected={activeTab === tab}
+                        tabIndex={activeTab === tab ? 0 : -1}
+                        className={activeTab === tab ? 'tab active' : 'tab'}
+                        onClick={() => setActiveTab(tab)}
+                      >
+                        {_t(`tabs.${tab}`)}
+                        <span className="tabCount">
+                          {tab === 'review'
+                            ? reviewCandidates.length
+                            : tab === 'monitored'
+                              ? visibleMonitoredRows.length
+                              : ignoredNotMonitoredCandidates.length}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div id="specials-panel" role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
+                    {activeTab === 'review' &&
+                      (reviewCandidates.length ? (
+                        <CandidateStatusGroups groups={reviewCandidateGroups} busy={busy} run={run} _t={_t} />
+                      ) : (
+                        <p className="empty">{_t('empty.noReview')}</p>
+                      ))}
+                    {activeTab === 'monitored' &&
+                      (visibleMonitoredRows.length ? (
+                        <MonitoredRowsList
+                          availableRows={availableMonitoredRows}
+                          monitoredRows={pendingMonitoredRows}
+                          comedianName={selectedComedian.name}
+                          busy={busy}
+                          run={run}
+                          _t={_t}
+                        />
+                      ) : (
+                        <p className="empty">{_t('empty.noMonitored')}</p>
+                      ))}
+                    {activeTab === 'notMonitored' &&
+                      (ignoredNotMonitoredCandidates.length ? (
+                        <CandidateStatusGroups
+                          groups={notWantedCandidateGroups}
+                          busy={busy}
+                          run={run}
+                          _t={_t}
+                        />
+                      ) : (
+                        <p className="empty">{_t('empty.noNotMonitored')}</p>
+                      ))}
+                  </div>
+                  <FilmAppearances
+                    key={selectedComedian.id}
+                    comedianId={selectedComedian.id}
+                    language={settings.language}
+                  />
+                  <div className="scanFooter">
+                    <span>{_t('detail.footer')}</span>
+                    <button
+                      type="button"
+                      className="glassAction"
+                      disabled={Boolean(busy) || !selectedComedian.tmdbPersonId}
+                      onClick={() =>
+                        void run(
+                          `scan-${selectedComedian.id}`,
+                          () =>
+                            api<ScanResult>(`/api/comedians/${selectedComedian.id}/scan`, { method: 'POST' }),
+                          (result) =>
+                            _t('notice.candidatesSaved', { name: result.comedian.name, count: result.saved })
+                        )
+                      }
+                    >
+                      <RefreshCcw
+                        size={17}
+                        className={selectedComedianScanning ? 'spin' : ''}
+                        aria-hidden="true"
+                      />
+                      {_t(selectedComedianScanning ? 'detail.scanning' : 'detail.scanForSpecials')}
+                    </button>
+                  </div>
+                </>
+              )}
             </section>
-          </div>
-
-          <div className="detailPanel">
-            {selectedComedian && (
-            <div className="panelHeader spread">
-              <div>
-                <div className="inlineTitle">
-                  <button type="button" className="mobileBack" onClick={() => setDetailOpen(false)} aria-label={_t('detail.back')} title={_t('detail.back')}>
-                    <ChevronLeft size={16} aria-hidden="true" />
-                  </button>
-                  <h2>
-                    {selectedComedian.name}
-                    {countryFlag(selectedComedian.countryCode) && (
-                      <span className="headingFlag" title={selectedComedian.countryName ?? selectedComedian.placeOfBirth ?? undefined}>
-                        {countryFlag(selectedComedian.countryCode)}
-                      </span>
-                    )}
-                  </h2>
-                </div>
-                <div className="detailLinks" aria-label={_t('detail.linksLabel', { name: selectedComedian.name })}>
-                  {selectedComedian.tmdbPersonId && (
-                    <a href={`https://www.themoviedb.org/person/${selectedComedian.tmdbPersonId}`} target="_blank" rel="noreferrer">
-                      {_t('detail.viewTmdb')}
-                      <ExternalLink size={14} aria-hidden="true" />
-                    </a>
-                  )}
-                  {selectedComedian.homepage && (
-                    <a href={selectedComedian.homepage} target="_blank" rel="noreferrer">
-                      {_t('detail.viewHomepage')}
-                      <ExternalLink size={14} aria-hidden="true" />
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-            )}
-            {!selectedComedian && addingComedian ? (
-              <div className="detailEmptyState detailLoadingState" role="status" aria-live="polite">
-                <RefreshCcw className="spin" size={34} aria-hidden="true" />
-                <strong>{_t('detail.addingComedianTitle')}</strong>
-                <span>{_t('detail.addingComedianHint')}</span>
-              </div>
-            ) : !selectedComedian ? (
-              <div className="detailEmptyState">
-                <Film size={56} strokeWidth={1.8} aria-hidden="true" />
-                <strong>{_t('detail.noSelectionTitle')}</strong>
-                <span>{_t('detail.noSelectionHint')}</span>
-              </div>
-            ) : (
-            <>
-            {selectedComedianScanning && (
-              <div className="scanNotice" role="status" aria-live="polite">
-                <RefreshCcw className="spin" size={17} aria-hidden="true" />
-                <span>{_t('detail.scanning')}</span>
-              </div>
-            )}
-            <div className="tabs desktopTabs" role="tablist" aria-label={_t('detail.resultCategories', { name: selectedComedian.name })}>
-              {hasReviewCandidates && (
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeDetailTab === 'review'}
-                  className={activeDetailTab === 'review' ? 'tab active' : 'tab'}
-                  onClick={() => setActiveTab('review')}
-                >
-                  <span>{_t('tabs.review')}</span>
-                  <span className="tabCount">{reviewCandidates.length}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeDetailTab === 'monitored'}
-                className={activeDetailTab === 'monitored' ? 'tab active' : 'tab'}
-                onClick={() => setActiveTab('monitored')}
-              >
-                <span>{_t('tabs.monitored')}</span>
-                <span className="tabCount">{visibleMonitoredRows.length}</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeDetailTab === 'notMonitored'}
-                className={activeDetailTab === 'notMonitored' ? 'tab active' : 'tab'}
-                onClick={() => setActiveTab('notMonitored')}
-              >
-                <span>{_t('tabs.notMonitored')}</span>
-                <span className="tabCount">{ignoredNotMonitoredCandidates.length}</span>
-              </button>
-            </div>
-            <div className="desktopTabPanels">
-              {activeDetailTab === 'review' && (
-                <>
-                  {reviewCandidates.length > 0 && (
-                    <CandidateStatusGroups groups={reviewCandidateGroups} busy={busy} run={run} _t={_t} />
-                  )}
-                  {reviewCandidates.length === 0 && !selectedComedianScanning && (
-                    <p className="empty">
-                      {selectedComedian ? _t('empty.noReview') : _t('empty.chooseReview')}
-                    </p>
-                  )}
-                </>
-              )}
-              {activeDetailTab === 'monitored' && (
-                <>
-                  {hasMonitoredRows && (
-                    <MonitoredRowsList
-                      availableRows={availableMonitoredRows}
-                      monitoredRows={pendingMonitoredRows}
-                      comedianName={selectedComedian?.name ?? null}
-                      busy={busy}
-                      run={run}
-                      _t={_t}
-                    />
-                  )}
-                  {visibleMonitoredRows.length === 0 && !selectedComedianScanning && (
-                    <p className="empty">
-                      {selectedComedian ? _t('empty.noMonitored') : _t('empty.chooseMonitored')}
-                    </p>
-                  )}
-                </>
-              )}
-              {activeDetailTab === 'notMonitored' && (
-                <>
-                  {ignoredNotMonitoredCandidates.length > 0 && (
-                    <CandidateStatusGroups groups={notWantedCandidateGroups} busy={busy} run={run} _t={_t} />
-                  )}
-                  {ignoredNotMonitoredCandidates.length === 0 && !selectedComedianScanning && (
-                    <p className="empty">
-                      {selectedComedian ? _t('empty.noNotMonitored') : _t('empty.chooseNotMonitored')}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-            <div className="detailSections">
-              {hasReviewCandidates && (
-                <section className="detailSection">
-                  <div className="detailSectionHeader">
-                    <h3>{_t('tabs.review')}</h3>
-                    <span className="sectionCount">{reviewCandidates.length}</span>
-                  </div>
-                  <CandidateStatusGroups groups={reviewCandidateGroups} busy={busy} run={run} _t={_t} />
-                </section>
-              )}
-
-              {(hasMonitoredRows || !hasNotMonitoredCandidates) && (
-                <section className="detailSection">
-                  <div className="detailSectionHeader">
-                    <h3>{_t('tabs.monitored')}</h3>
-                    <span className="sectionCount">{visibleMonitoredRows.length}</span>
-                  </div>
-                  {hasMonitoredRows && (
-                    <MonitoredRowsList
-                      availableRows={availableMonitoredRows}
-                      monitoredRows={pendingMonitoredRows}
-                      comedianName={selectedComedian?.name ?? null}
-                      busy={busy}
-                      run={run}
-                      _t={_t}
-                    />
-                  )}
-                    {visibleMonitoredRows.length === 0 && !selectedComedianScanning && (
-                      <p className="empty">
-                        {selectedComedian ? _t('empty.noMonitored') : _t('empty.chooseMonitored')}
-                      </p>
-                    )}
-                </section>
-              )}
-
-              {hasNotMonitoredCandidates && (
-                <section className="detailSection">
-                  <div className="detailSectionHeader">
-                    <h3>{_t('tabs.notMonitored')}</h3>
-                    <span className="sectionCount">{ignoredNotMonitoredCandidates.length}</span>
-                  </div>
-                  {ignoredNotMonitoredCandidates.length > 0 && (
-                    <CandidateStatusGroups groups={notWantedCandidateGroups} busy={busy} run={run} _t={_t} />
-                  )}
-                    {ignoredNotMonitoredCandidates.length === 0 && !selectedComedianScanning && (
-                      <p className="empty">
-                        {selectedComedian ? _t('empty.noNotMonitored') : _t('empty.chooseNotMonitored')}
-                      </p>
-                    )}
-                </section>
-              )}
-            </div>
-            </>
-            )}
-          </div>
-        </section>
+          </section>
         )}
       </section>
+      <dialog
+        ref={addDialogRef}
+        className="addDialog"
+        aria-labelledby="add-title"
+        onCancel={(event) => {
+          if (addingPersonId !== null) event.preventDefault();
+          else setShowAddComedian(false);
+        }}
+        onClose={() => {
+          searchControllerRef.current?.abort();
+          setShowAddComedian(false);
+        }}
+      >
+        <div className="sheetHeading">
+          <h2 id="add-title">{_t('comedians.addNew')}</h2>
+          <button
+            type="button"
+            className="iconButton"
+            aria-label={_t('actions.close')}
+            disabled={addingPersonId !== null}
+            onClick={() => setShowAddComedian(false)}
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        <form className="addComedianForm" onSubmit={addComedian}>
+          <label htmlFor="comedian-search" className="srOnly">
+            {_t('comedians.searchLabel')}
+          </label>
+          <div className="addRow">
+            <input
+              id="comedian-search"
+              placeholder={_t('comedians.searchPlaceholder')}
+              value={name}
+              autoComplete="off"
+              disabled={addingPersonId !== null}
+              onChange={(event) => {
+                setName(event.target.value);
+                setPersonMatches([]);
+              }}
+            />
+            <button className="primary" type="submit" disabled={Boolean(busy) || !name.trim()}>
+              <Search size={17} aria-hidden="true" />
+              {_t('comedians.search')}
+            </button>
+          </div>
+        </form>
+        {busy === 'search-comedian' && (
+          <p role="status" className="inlineStatus">
+            {_t('comedians.search')}…
+          </p>
+        )}
+        <div className="personMatches" aria-live="polite">
+          {personMatches.map((match) => {
+            const saved = comedians.find((comedian) => comedian.tmdbPersonId === match.tmdbPersonId);
+            return (
+              <article className="personMatch" key={match.tmdbPersonId}>
+                <span className="avatar">
+                  {match.profilePath ? (
+                    <img loading="lazy" src={`${imageBase}${match.profilePath}`} alt="" />
+                  ) : (
+                    match.name.slice(0, 1)
+                  )}
+                </span>
+                <div className="personMatchCopy">
+                  <strong>{match.name}</strong>
+                  <span>{match.knownFor.join(' · ')}</span>
+                  {Boolean(match.matchReasons?.length) && <small>{_t('comedians.likelyComedian')}</small>}
+                </div>
+                <button
+                  type="button"
+                  className="glassAction"
+                  disabled={Boolean(busy)}
+                  onClick={() => {
+                    if (saved) {
+                      setSelectedComedianId(saved.id);
+                      setActiveTab('review');
+                      setLibraryView('comedians');
+                      setDetailOpen(true);
+                      setShowAddComedian(false);
+                    } else void addComedianMatch(match);
+                  }}
+                >
+                  {addingPersonId === match.tmdbPersonId
+                    ? _t('comedians.adding')
+                    : _t(saved ? 'comedians.show' : 'actions.add')}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+        {error && (
+          <p className="inlineError" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && !error && (
+          <p className="inlineStatus" role="status">
+            {notice}
+          </p>
+        )}
+        <div className="sheetFooter">
+          <button type="button" disabled={addingPersonId !== null} onClick={() => setShowAddComedian(false)}>
+            {_t('actions.cancel')}
+          </button>
+        </div>
+      </dialog>
     </main>
   );
 }
 
 type RunFn = <T>(label: string, task: () => Promise<T>, success?: (result: T) => string) => Promise<void>;
 
-function hasDirectComedianEvidence(candidate: Candidate) {
-  return candidate.reasons.includes('Comedian name in title') || candidate.reasons.includes('Credited as self');
-}
-
-// Radarr can prove a movie is already monitored, but it cannot prove that the
-// selected comedian is meaningfully attached to that movie. Hide approved
-// Radarr-only matches from the monitored counts unless the scanner found direct
-// comedian evidence too.
-function isWeakRadarrOnlyMatch(candidate: Candidate) {
-  return candidate.status === 'approved' && candidate.reasons.includes('Already in Radarr') && !hasDirectComedianEvidence(candidate);
-}
-
-function TmdbMovieTitleLink({ tmdbMovieId, title }: { tmdbMovieId: number | null; title: string }) {
-  if (!tmdbMovieId) {
-    return <>{title}</>;
-  }
-
-  return (
-    <a className="tmdbTitleLink" href={`https://www.themoviedb.org/movie/${tmdbMovieId}`} target="_blank" rel="noreferrer">
-      <span className="tmdbTitleText">{title}</span>
-      <ExternalLink size={13} aria-hidden="true" />
-    </a>
-  );
-}
+type MonitoredRow = { movie: RadarrMonitoredMovie; candidate: Candidate | null };
+type CandidateStatusGroup = { status: Candidate['status']; candidates: Candidate[] };
 
 function TmdbMovieMetaLink({ tmdbMovieId }: { tmdbMovieId: number }) {
   return (
-    <a className="tmdbMetaLink" href={`https://www.themoviedb.org/movie/${tmdbMovieId}`} target="_blank" rel="noreferrer">
-      <span>TMDB {tmdbMovieId}</span>
+    <a
+      href={`https://www.themoviedb.org/movie/${tmdbMovieId}`}
+      target="_blank"
+      rel="noreferrer"
+      className="tmdbMetaLink"
+    >
+      TMDB
       <ExternalLink size={12} aria-hidden="true" />
     </a>
   );
 }
-
-type MonitoredRow = {
-  movie: RadarrMonitoredMovie;
-  candidate: Candidate | null;
-};
 
 function MonitoredRowsList({
   availableRows,
@@ -1586,45 +1662,34 @@ function MonitoredRowsList({
   run: RunFn;
   _t: Translator;
 }) {
-  const renderRows = (rows: MonitoredRow[]) =>
-    rows.map(({ movie, candidate }) => (
-      <MonitoredMovieRow
-        key={movie.id}
-        movie={movie}
-        candidate={candidate}
-        comedianName={comedianName}
-        busy={busy}
-        run={run}
-        _t={_t}
-      />
-    ));
-
   return (
-    <div className="monitoredGroups">
-      {availableRows.length > 0 && (
-        <section className="mediaGroup">
-          <div className="mediaGroupTitle">
-            <span>{_t('sections.availableWithCount', { count: availableRows.length })}</span>
-          </div>
-          <div className="monitoredList">{renderRows(availableRows)}</div>
-        </section>
-      )}
-      {monitoredRows.length > 0 && (
-        <section className="mediaGroup">
-          <div className="mediaGroupTitle">
-            <span>{_t('sections.monitoredWithCount', { count: monitoredRows.length })}</span>
-          </div>
-          <div className="monitoredList">{renderRows(monitoredRows)}</div>
-        </section>
-      )}
+    <div className="mediaGroups">
+      {[
+        { rows: availableRows, label: 'sections.availableWithCount' as const },
+        { rows: monitoredRows, label: 'sections.monitoredWithCount' as const }
+      ]
+        .filter((group) => group.rows.length)
+        .map((group) => (
+          <section className="mediaGroup" key={group.label}>
+            <h3 className="mediaGroupTitle">{_t(group.label, { count: group.rows.length })}</h3>
+            <div className="groupedList">
+              {group.rows.map(({ movie, candidate }) => (
+                <MonitoredMovieRow
+                  key={movie.id}
+                  movie={movie}
+                  candidate={candidate}
+                  comedianName={comedianName}
+                  busy={busy}
+                  run={run}
+                  _t={_t}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
     </div>
   );
 }
-
-type CandidateStatusGroup = {
-  status: Candidate['status'];
-  candidates: Candidate[];
-};
 
 function CandidateStatusGroups({
   groups,
@@ -1641,10 +1706,15 @@ function CandidateStatusGroups({
     <div className="mediaGroups">
       {groups.map((group) => (
         <section className="mediaGroup" key={group.status}>
-          <div className="mediaGroupTitle">
-            <span>{_t('sections.statusWithCount', { status: _t(`status.${group.status}`), count: group.candidates.length })}</span>
-          </div>
-          <div className="candidateGrid">
+          {group.status !== 'new' && (
+            <h3 className="mediaGroupTitle">
+              {_t('sections.statusWithCount', {
+                status: _t(`status.${group.status}`),
+                count: group.candidates.length
+              })}
+            </h3>
+          )}
+          <div className="groupedList">
             {group.candidates.map((candidate) => (
               <CandidateCard key={candidate.id} candidate={candidate} busy={busy} run={run} _t={_t} />
             ))}
@@ -1652,6 +1722,41 @@ function CandidateStatusGroups({
         </section>
       ))}
     </div>
+  );
+}
+
+function AcknowledgeButton({
+  candidate,
+  busy,
+  run,
+  _t
+}: {
+  candidate: Candidate;
+  busy: string | null;
+  run: RunFn;
+  _t: Translator;
+}) {
+  return (
+    <button
+      type="button"
+      className="glassAction"
+      disabled={Boolean(busy)}
+      aria-label={_t('candidate.acknowledge', { title: candidate.title })}
+      onClick={() =>
+        void run(
+          `ack-${candidate.id}`,
+          () =>
+            api<Candidate>(`/api/candidates/${candidate.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ status: 'approved' })
+            }),
+          () => _t('notice.candidateAcknowledged', { title: candidate.title })
+        )
+      }
+    >
+      <Check size={15} aria-hidden="true" />
+      {_t('candidate.ok')}
+    </button>
   );
 }
 
@@ -1670,166 +1775,169 @@ function MonitoredMovieRow({
   run: RunFn;
   _t: Translator;
 }) {
-  const canRemoveFromRadarr = Boolean(candidate?.radarrMovieId && !movie.hasFile);
-  const removing = candidate ? busy === `remove-radarr-${candidate.id}` : false;
-  const tmdbMovieId = candidate?.tmdbMovieId ?? movie.tmdbId;
-  const posterPath = candidate?.posterPath ?? null;
-  const rowComedianName = candidate?.comedianName ?? comedianName;
-  const displayTitle = titleWithoutComedianName(candidate?.title ?? movie.title, rowComedianName);
-  const bylineParts = [rowComedianName, movie.year ?? candidate?.year].filter((part): part is string | number => Boolean(part));
-  const overview = candidate?.overview?.trim();
-
-  return (
-    <article className="mediaCard monitoredItem">
-      <div className={movie.hasFile ? 'mediaPoster monitoredPoster' : 'mediaPoster monitoredPoster unavailable'}>
-        {posterPath ? <img src={`${imageBase}${posterPath}`} alt={_t('candidate.posterAlt', { title: movie.title })} /> : <Film size={22} aria-hidden="true" />}
-        <span
-          className={movie.hasFile ? 'monitoredStatus downloaded' : 'monitoredStatus'}
-          title={movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
-          aria-label={movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}
-          role="img"
-        >
-          {movie.hasFile ? <Check size={13} aria-hidden="true" /> : <Eye size={13} aria-hidden="true" />}
-        </span>
-      </div>
-      <div className="mediaDetails">
-        <strong className="mediaTitle">{displayTitle}</strong>
-        {bylineParts.length > 0 && <span className="mediaByline">{bylineParts.join(' · ')}</span>}
-        <span className="mediaMeta">
-          <span>{movie.hasFile ? _t('radarr.downloaded') : _t('radarr.monitored')}</span>
-          {tmdbMovieId && (
-            <>
-              <span aria-hidden="true"> · </span>
-              <TmdbMovieMetaLink tmdbMovieId={tmdbMovieId} />
-            </>
-          )}
-        </span>
-        {overview && <p className="mediaOverview">{overview}</p>}
-      </div>
-      {canRemoveFromRadarr && candidate && (
-        <div className="mediaActions monitoredActions">
-          <button
-            type="button"
-            title={removing ? _t('radarr.removing', { title: movie.title }) : _t('radarr.remove', { title: movie.title })}
-            aria-label={removing ? _t('radarr.removing', { title: movie.title }) : _t('radarr.remove', { title: movie.title })}
-            disabled={removing}
-            onClick={() =>
-              run(
-                `remove-radarr-${candidate.id}`,
-                () => api<Candidate>(`/api/candidates/${candidate.id}/remove-from-radarr`, { method: 'POST' }),
-                () => _t('notice.removed', { title: movie.title })
-              )
-            }
-          >
-            {removing ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Trash2 size={16} aria-hidden="true" />}
-            <span className="buttonText">{removing ? _t('radarr.removingButton') : _t('radarr.removeButton')}</span>
-          </button>
-        </div>
-      )}
-    </article>
+  const displayTitle = titleWithoutComedianName(
+    candidate?.title ?? movie.title,
+    candidate?.comedianName ?? comedianName
   );
-}
-
-function CandidateCard({ candidate, busy, run, _t }: { candidate: Candidate; busy: string | null; run: RunFn; _t: Translator }) {
-  const autoAdded = candidate.status === 'auto_added';
-  const canAddToRadarr =
-    candidate.status === 'new' ||
-    candidate.status === 'ignored' ||
-    candidate.status === 'rejected' ||
-    (candidate.status === 'approved' && candidate.radarrMovieId != null);
-  const canIgnore = candidate.status === 'new';
-  const actionable = canAddToRadarr || autoAdded || canIgnore;
-  const acking = busy === `ack-${candidate.id}`;
-  const approving = busy === `approve-${candidate.id}`;
-  const ignoring = busy === `ignore-${candidate.id}`;
-  const actionControls = actionable ? (
-    <div className="mediaActions candidateActions">
-      {autoAdded && (
-        <button
-          type="button"
-          className="primary"
-          disabled={acking}
-          aria-label={acking ? _t('candidate.savingAck', { title: candidate.title }) : _t('candidate.acknowledge', { title: candidate.title })}
-          title={acking ? _t('candidate.savingAck', { title: candidate.title }) : _t('candidate.acknowledge', { title: candidate.title })}
-          onClick={() =>
-            run(
-              `ack-${candidate.id}`,
-              () =>
-                api<Candidate>(`/api/candidates/${candidate.id}`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ status: 'approved' })
-                }),
-              () => _t('notice.candidateAcknowledged', { title: candidate.title })
-            )
-          }
-        >
-          {acking ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}
-          <span className="buttonText">{acking ? _t('candidate.saving') : _t('candidate.ok')}</span>
-        </button>
-      )}
-      {canAddToRadarr && (
-        <button
-          type="button"
-          className="primary"
-          disabled={approving}
-          aria-label={approving ? _t('candidate.addingToRadarr', { title: candidate.title }) : _t('candidate.addToRadarr', { title: candidate.title })}
-          title={approving ? _t('candidate.addingToRadarr', { title: candidate.title }) : _t('candidate.addToRadarr', { title: candidate.title })}
-          onClick={() =>
-            run(
-              `approve-${candidate.id}`,
-              () => api<Candidate>(`/api/candidates/${candidate.id}/approve`, { method: 'POST' }),
-              () => _t('notice.sentToRadarr', { title: candidate.title })
-            )
-          }
-        >
-          {approving ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-          <span className="buttonText">{approving ? _t('candidate.addingToRadarrButton') : _t('candidate.addToRadarrButton')}</span>
-        </button>
-      )}
-      {canIgnore && (
-        <button
-          type="button"
-          disabled={ignoring}
-          aria-label={ignoring ? _t('candidate.ignoring', { title: candidate.title }) : _t('candidate.ignore', { title: candidate.title })}
-          title={ignoring ? _t('candidate.ignoring', { title: candidate.title }) : _t('candidate.ignore', { title: candidate.title })}
-          onClick={() =>
-            run(`ignore-${candidate.id}`, () =>
-              api<Candidate>(`/api/candidates/${candidate.id}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ status: 'ignored' })
-              })
-            )
-          }
-        >
-          {ignoring ? <RefreshCcw className="spin" size={16} aria-hidden="true" /> : <EyeOff size={16} aria-hidden="true" />}
-          <span className="buttonText">{ignoring ? _t('candidate.ignoringButton') : _t('candidate.ignoreButton')}</span>
-        </button>
-      )}
-    </div>
-  ) : null;
-  const displayTitle = titleWithoutComedianName(candidate.title, candidate.comedianName);
-
+  const posterPath = candidate?.posterPath;
   return (
-    <article className="mediaCard candidate">
+    <article className="mediaRow monitoredRow">
       <div className="mediaPoster">
-        {candidate.posterPath ? (
-          <img src={`${imageBase}${candidate.posterPath}`} alt={_t('candidate.posterAlt', { title: candidate.title })} />
+        {posterPath ? (
+          <img loading="lazy" src={`${imageBase}${posterPath}`} alt="" />
         ) : (
-          <Film size={30} aria-hidden="true" />
+          <Film size={24} aria-hidden="true" />
         )}
       </div>
       <div className="mediaDetails">
         <strong className="mediaTitle">{displayTitle}</strong>
-        <span className="mediaByline">{candidate.comedianName}{candidate.year ? ` · ${candidate.year}` : ''}</span>
-        <span className="mediaMeta">
-          <span>{_t(`status.${candidate.status}`)}</span>
-          <span aria-hidden="true"> · </span>
-          <TmdbMovieMetaLink tmdbMovieId={candidate.tmdbMovieId} />
+        <span className="mediaByline">
+          {[candidate?.comedianName ?? comedianName, movie.year ?? candidate?.year]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
-        <p className="mediaOverview">{candidate.overview || _t('candidate.noOverview')}</p>
+        <span className="rowStatus">
+          {movie.hasFile ? <Check size={12} aria-hidden="true" /> : <Eye size={12} aria-hidden="true" />}
+          {_t(movie.hasFile ? 'radarr.downloaded' : 'radarr.monitored')}
+        </span>
+        {candidate && isReleaseDate(candidate.releaseDate) && candidate.releaseDate > localCalendarDate() && (
+          <span className="mediaByline">
+            {_t('detail.releaseDate', {
+              date: new Date(`${candidate.releaseDate}T12:00:00`).toLocaleDateString()
+            })}
+          </span>
+        )}
+        <details className="matchDisclosure">
+          <summary>{_t('detail.matchDetails')}</summary>
+          <p>{candidate?.overview || _t('candidate.noOverview')}</p>
+          {movie.tmdbId && <TmdbMovieMetaLink tmdbMovieId={movie.tmdbId} />}
+        </details>
       </div>
-      <strong className={candidate.confidence >= 70 ? 'score high' : 'score'}>{candidate.confidence}</strong>
-      {actionControls}
+      <div className="mediaActions">
+        {candidate?.status === 'auto_added' && (
+          <AcknowledgeButton candidate={candidate} busy={busy} run={run} _t={_t} />
+        )}
+        {candidate?.radarrMovieId && !movie.hasFile && (
+          <button
+            type="button"
+            className="textButton"
+            disabled={Boolean(busy)}
+            aria-label={_t('radarr.remove', { title: movie.title })}
+            onClick={() =>
+              void run(
+                `remove-radarr-${candidate.id}`,
+                () =>
+                  api<Candidate>(`/api/candidates/${candidate.id}/remove-from-radarr`, { method: 'POST' }),
+                () => _t('notice.removed', { title: movie.title })
+              )
+            }
+          >
+            <Trash2 size={16} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function CandidateCard({
+  candidate,
+  busy,
+  run,
+  _t,
+  upcoming = false
+}: {
+  candidate: Candidate;
+  busy: string | null;
+  run: RunFn;
+  _t: Translator;
+  upcoming?: boolean;
+}) {
+  const canAdd = upcoming ? candidate.status === 'new' : candidate.status !== 'auto_added';
+  return (
+    <article className="mediaRow candidateRow">
+      <div className="mediaPoster">
+        {candidate.posterPath ? (
+          <img loading="lazy" src={`${imageBase}${candidate.posterPath}`} alt="" />
+        ) : (
+          <Film size={24} aria-hidden="true" />
+        )}
+      </div>
+      <div className="mediaDetails">
+        <strong className="mediaTitle">
+          {titleWithoutComedianName(candidate.title, candidate.comedianName)}
+        </strong>
+        <span className="mediaByline">
+          {candidate.comedianName}
+          {candidate.year ? ` · ${candidate.year}` : ''}
+        </span>
+        {upcoming && candidate.releaseDate && (
+          <span className="releaseDate">
+            {_t('detail.releaseDate', {
+              date: new Date(`${candidate.releaseDate}T12:00:00`).toLocaleDateString()
+            })}
+          </span>
+        )}
+        {upcoming && candidate.status !== 'new' && (
+          <span className="rowStatus">{_t('radarr.monitored')}</span>
+        )}
+        <details className="matchDisclosure">
+          <summary>{_t('detail.matchDetails')}</summary>
+          <p>{_t('detail.confidence', { score: candidate.confidence })}</p>
+          <ul>
+            {candidate.reasons.map((reason, index) => (
+              <li key={index}>{reason}</li>
+            ))}
+          </ul>
+          <p>{candidate.overview || _t('candidate.noOverview')}</p>
+          <TmdbMovieMetaLink tmdbMovieId={candidate.tmdbMovieId} />
+        </details>
+      </div>
+      <div className="mediaActions">
+        {canAdd && (
+          <button
+            type="button"
+            className="glassAction"
+            disabled={Boolean(busy)}
+            aria-label={_t('candidate.addToRadarr', { title: candidate.title })}
+            onClick={() =>
+              void run(
+                `approve-${candidate.id}`,
+                () => api<Candidate>(`/api/candidates/${candidate.id}/approve`, { method: 'POST' }),
+                () => _t('notice.sentToRadarr', { title: candidate.title })
+              )
+            }
+          >
+            {busy === `approve-${candidate.id}` ? (
+              <RefreshCcw className="spin" size={15} aria-hidden="true" />
+            ) : (
+              <Plus size={15} aria-hidden="true" />
+            )}
+            {_t('actions.add')}
+          </button>
+        )}
+        {candidate.status === 'auto_added' && (
+          <AcknowledgeButton candidate={candidate} busy={busy} run={run} _t={_t} />
+        )}
+        {candidate.status === 'new' && (
+          <button
+            type="button"
+            className="textButton"
+            disabled={Boolean(busy)}
+            aria-label={_t('candidate.ignore', { title: candidate.title })}
+            onClick={() =>
+              void run(`ignore-${candidate.id}`, () =>
+                api<Candidate>(`/api/candidates/${candidate.id}`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ status: 'ignored' })
+                })
+              )
+            }
+          >
+            {_t('candidate.ignoreButton')}
+          </button>
+        )}
+      </div>
     </article>
   );
 }
